@@ -18,3 +18,16 @@ results/raw/pilot_results.csv
 
 # Additional pilot backups
 results/raw/*backup*.csv
+
+# Additional virtual environments
+.venv-1/
+
+# Generated simulation outputs
+results/raw/*.csv
+
+# Binary profiler outputs
+results/profiling/*.prof
+
+# Detailed benchmark execution logs
+results/benchmarks/*.log
+results/benchmarks/baseline_time_*.txt

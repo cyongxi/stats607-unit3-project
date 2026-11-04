@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from src.dgps import generate_data
-from src.methods import fit_lasso
+from src.methods import calculate_lambda, fit_lasso
 from src.metrics import exact_recovery
 from src.scenarios import generate_scenarios
 
@@ -39,30 +39,41 @@ def run_simulation(
 
     for scenario_index, (_, scenario) in enumerate(
         scenarios.iterrows(), start=1
-        ):
+    ):
         reps = (
             n_replications
             if n_replications is not None
             else int(scenario["n_replications"])
         )
 
+        # Precompute scenario-specific parameters once.
+        n = int(scenario["n"])
+        p = int(scenario["p"])
+        k = int(scenario["k"])
+        sigma = float(scenario["sigma"])
+        beta_min = float(scenario["beta_min"])
+        theta = float(scenario["theta"])
+
+        lam = calculate_lambda(n, p, k, sigma)
+
         for replication_id in range(reps):
             rng = np.random.default_rng(next(child_seeds))
 
             data = generate_data(
-                n=int(scenario["n"]),
-                p=int(scenario["p"]),
-                k=int(scenario["k"]),
-                sigma=float(scenario["sigma"]),
-                beta_min=float(scenario["beta_min"]),
+                n=n,
+                p=p,
+                k=k,
+                sigma=sigma,
+                beta_min=beta_min,
                 rng=rng,
             )
 
             fitted = fit_lasso(
                 X=data["X"],
                 y=data["y"],
-                k=int(scenario["k"]),
-                sigma=float(scenario["sigma"]),
+                k=k,
+                sigma=sigma,
+                lam=lam,
             )
 
             success = exact_recovery(
@@ -75,10 +86,10 @@ def run_simulation(
                     "scenario_id": scenario["scenario_id"],
                     "replication_id": replication_id,
                     "regime": scenario["regime"],
-                    "p": int(scenario["p"]),
-                    "k": int(scenario["k"]),
-                    "n": int(scenario["n"]),
-                    "theta": float(scenario["theta"]),
+                    "p": p,
+                    "k": k,
+                    "n": n,
+                    "theta": theta,
                     "success": int(success),
                     "lambda_n": fitted["lambda_n"],
                     "n_iter": fitted["n_iter"],

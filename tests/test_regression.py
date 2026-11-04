@@ -92,3 +92,36 @@ def test_lasso_recovery_is_reproducible():
     )
 
     assert outputs[0]["success"] == outputs[1]["success"]
+
+
+def test_parallel_matches_serial_across_scenarios():
+    """Parallel and serial results should match across scenarios."""
+    from src.parallel import run_parallel
+    from src.simulation import run_simulation
+    from src.scenarios import generate_scenarios
+
+    # Select scenarios with different dimensions and regimes.
+    scenarios = generate_scenarios().iloc[[0, 42, 84]]
+
+    serial = run_simulation(
+        scenarios,
+        n_replications=3,
+        master_seed=6072026,
+    )
+
+    parallel = run_parallel(
+        scenarios,
+        n_replications=3,
+        master_seed=6072026,
+        max_workers=2,
+    )
+
+    import pandas as pd
+
+    pd.testing.assert_frame_equal(
+        serial.reset_index(drop=True),
+        parallel.reset_index(drop=True),
+        check_exact=False,
+        rtol=1e-10,
+        atol=1e-10,
+    )

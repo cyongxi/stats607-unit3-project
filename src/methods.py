@@ -22,7 +22,7 @@ def calculate_lambda(n, p, k, sigma):
     )
 
 
-def fit_lasso(X, y, k, sigma, tol=1e-7, max_iter=20000):
+def fit_lasso(X, y, k, sigma, tol=1e-7, max_iter=20000, lam=None):
     """Fit Lasso using the regularization parameter from the paper."""
     X = np.asarray(X, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -35,7 +35,8 @@ def fit_lasso(X, y, k, sigma, tol=1e-7, max_iter=20000):
     if y.shape != (n,):
         raise ValueError("y must have length n.")
 
-    lam = calculate_lambda(n, p, k, sigma)
+    if lam is None:
+        lam = calculate_lambda(n, p, k, sigma)
 
     model = Lasso(
         alpha=lam,
