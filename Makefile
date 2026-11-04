@@ -1,7 +1,6 @@
 PYTHON := .venv/bin/python
 
-.PHONY: all simulate analyze figures test clean pilot profile complexity benchmark parallel stability-check
-
+.PHONY: all simulate analyze figures test clean pilot profile complexity benchmark benchmark-report parallel stability-check
 all: simulate analyze figures
 
 simulate:
@@ -32,6 +31,9 @@ clean:
 
 benchmark:
 	$(PYTHON) -m scripts.benchmark
+
+benchmark-report:
+	$(PYTHON) -m scripts.benchmark --report-only
 
 profile:
 	mkdir -p results/profiling

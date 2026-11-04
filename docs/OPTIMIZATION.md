@@ -196,45 +196,122 @@ The combined implementation initially achieved approximately 2.47× speedup rela
 
 These were preliminary comparisons. Worker configurations were not yet evaluated under the final repeated benchmark protocol.
 
-### 4.4 Repeated Benchmark
+### 4.4 Controlled Baseline-versus-Optimized Benchmark
 
-A benchmark script was implemented in `scripts/benchmark.py`.
+A controlled benchmark was conducted to compare the original Unit 2 implementation with the optimized Unit 3 implementations.
 
-The benchmark used the same configured BLAS thread limits for each execution mode and measured three repetitions per configuration.
+The original implementation was recovered from the `unit3-baseline` Git tag (commit `ededf3b`) and executed from an independent Git worktree.
 
-The serial configuration in this benchmark included lambda precomputation. Therefore, this experiment measures the additional benefit of parallelization relative to the updated serial implementation, rather than independently measuring the original unmodified Unit 2 code.
+All configurations used the same Python 3.11.1 virtual environment, dependency versions, simulation design, and thread limits:
 
-Results:
+- `OPENBLAS_NUM_THREADS=1`
+- `OMP_NUM_THREADS=1`
+- `MKL_NUM_THREADS=1`
 
-| Configuration | Median runtime | Mean runtime | Speedup |
-|---|---:|---:|---:|
-| Precomputed serial | 75.451 s | 77.210 s | 1.00× |
-| Parallel, 2 workers | 57.900 s | 53.999 s | 1.30× |
-| Parallel, 4 workers | 48.413 s | 44.263 s | 1.56× |
+Each configuration completed 126 simulation scenarios with 200 replications per scenario, totaling 25,200 Lasso fits.
 
-The four-worker implementation reduced median wall-clock runtime by approximately 35.8% relative to the updated serial implementation.
+Each configuration was benchmarked three times using `/usr/bin/time -p`. The primary performance metric was median wall-clock time (`real`).
 
-The repeated benchmark results provide stronger evidence of performance improvement than the earlier single-run measurements.
+Five configurations were evaluated:
 
-However, substantial runtime variability was observed, especially in the parallel configurations.
+1. **Original:** Unmodified serial implementation.
+2. **Algorithmic-only:** Serial implementation with scenario-specific parameter precomputation.
+3. **Parallel-only (4 workers):** Parallel implementation without lambda precomputation, retaining some scenario-level parameter caching.
+4. **Combined (2 workers):** Parallel execution with lambda precomputation, using two workers.
+5. **Combined (4 workers):** Parallel execution with lambda precomputation, using four workers.
 
-Possible contributors include operating-system scheduling, competing background processes, processor thermal behavior, and process-management overhead. These causes were not isolated experimentally.
+#### Controlled Benchmark Results
 
-### 4.5 Trade-offs
+| Configuration | Median Real (s) | Mean Real (s) | Median CPU (s) | Speedup | Runtime Reduction |
+|---|---:|---:|---:|---:|---:|
+| Original | 75.87 | 76.270 | 75.42 | 1.000x | 0.0% |
+| Algorithmic-only | 75.73 | 75.727 | 75.23 | 1.002x | 0.2% |
+| Parallel-only (4) | 31.19 | 31.113 | 118.88 | 2.433x | 58.9% |
+| Combined (2) | 44.20 | 44.107 | 85.31 | 1.717x | 41.7% |
+| Combined (4) | 31.93 | 32.070 | 121.75 | 2.376x | 57.9% |
 
-Parallel execution substantially reduces wall-clock runtime for this independent Monte Carlo workload.
+Speedup is defined as:
 
-However, the implementation introduces additional complexity:
+\[
+S_p = \frac{T_{\mathrm{original}}}{T_p},
+\]
 
-- Process creation and coordination overhead.
-- Increased concurrent memory usage.
-- More complicated random-stream management.
-- Potential competition for CPU resources.
-- Dependence on worker count and hardware characteristics.
+where the original serial median runtime is 75.87 seconds.
 
-The results also show that parallel scaling is sublinear: doubling the number of workers does not produce a proportional reduction in runtime.
+The combined four-worker implementation achieved a 2.376x speedup, reducing median wall-clock runtime by approximately 57.9%.
 
-This is consistent with Amdahl's Law and the practical costs of multiprocessing.
+Lambda precomputation alone produced only a 0.2% apparent runtime reduction, which is too small to establish a meaningful performance improvement.
+
+The parallel-only configuration achieved a slightly lower median runtime than the combined four-worker configuration (31.19 versus 31.93 seconds). This small difference does not establish that precomputation makes parallel execution slower.
+
+The experiments were conducted sequentially rather than fully randomized. Consequently, temperature, operating-system scheduling, and background activity may have influenced the measurements.
+
+The parallel-only configuration specifically removes lambda precomputation while retaining some scenario-level parameter caching; it should not be interpreted as a complete isolation of every algorithmic modification.
+
+#### Performance Visualizations
+
+The controlled runtime comparison is available at:
+
+`results/figures/controlled_runtime_comparison.png`
+
+The CPU resource trade-off comparison is available at:
+
+`results/figures/controlled_cpu_tradeoff.png`
+
+The runtime figure reports the median of three measurements for each configuration, with error bars indicating the observed minimum-to-maximum range rather than confidence intervals.
+
+Raw measurements and summary statistics are saved in:
+
+- `results/benchmarks/controlled_benchmark_raw.csv`
+- `results/benchmarks/controlled_benchmark_summary.csv`
+
+Earlier exploratory benchmarks are retained as historical evidence but are not used as the primary estimates of the final controlled speedup.
+
+### 4.5 Performance and Resource Trade-offs
+
+Parallelization substantially reduces elapsed time but increases aggregate CPU time.
+
+The `/usr/bin/time -p` measurements distinguish:
+
+- `real`: Elapsed wall-clock time.
+- `user`: Aggregate CPU time spent executing user-space code.
+- `sys`: Aggregate CPU time spent executing kernel-space operations.
+
+Aggregate CPU time is calculated as `user + sys` for each run, followed by the median across three runs.
+
+| Configuration | Median Wall Time (s) | Median CPU Time (s) |
+|---|---:|---:|
+| Original | 75.87 | 75.42 |
+| Combined (2 workers) | 44.20 | 85.31 |
+| Combined (4 workers) | 31.93 | 121.75 |
+
+Relative to the original serial implementation:
+
+- Two workers reduced median wall-clock time by 41.7%, while increasing aggregate CPU time by approximately 13.1%.
+- Four workers reduced median wall-clock time by 57.9%, while increasing aggregate CPU time by approximately 61.4%.
+
+Parallel efficiency is defined as:
+
+\[
+E_p = \frac{T_1}{pT_p},
+\]
+
+where \(p\) is the number of worker processes.
+
+Using the original serial median as \(T_1\), the approximate parallel efficiencies were:
+
+| Configuration | Speedup | Parallel Efficiency |
+|---|---:|---:|
+| Combined (2 workers) | 1.717x | 85.8% |
+| Combined (4 workers) | 2.376x | 59.4% |
+
+The four-worker configuration is preferable when minimizing completion time is the primary objective.
+
+The two-worker configuration provides a better trade-off when aggregate CPU consumption and resource efficiency are important.
+
+The additional CPU cost of multiprocessing may reflect process management, repeated initialization, memory operations, scheduling, and resource contention. These factors were not isolated individually.
+
+Therefore, this project demonstrates a latency-oriented optimization rather than a reduction in total computational work.
 
 ## 5. Additional Optimization Experiments
 
@@ -339,36 +416,139 @@ The results do not establish that warnings are impossible in other simulation se
 
 ## 8. Reproducibility and Automation
 
-The updated Makefile provides the following targets:
+The project uses a Makefile to automate simulation, profiling, benchmarking, testing, and numerical stability checks.
+
+### 8.1 Makefile Targets
 
 | Target | Purpose |
 |---|---|
-| `make profile` | Profile the updated serial simulation |
+| `make simulate` | Run the updated serial simulation |
+| `make parallel` | Run the combined four-worker simulation |
+| `make profile` | Profile the updated serial implementation |
 | `make complexity` | Analyze empirical computational scaling |
-| `make benchmark` | Benchmark serial and parallel configurations |
-| `make parallel` | Run the four-worker parallel simulation |
-| `make stability-check` | Check numerical warnings and convergence diagnostics |
+| `make benchmark` | Re-run the controlled baseline-versus-optimized benchmark |
+| `make benchmark-report` | Regenerate benchmark summaries and figures from existing measurements |
+| `make stability-check` | Examine warnings, convergence, and numerical stability |
+| `make test` | Run automated correctness and regression tests |
 
-The benchmark script saves raw timing data, summary statistics, and a performance comparison figure.
+### 8.2 Reproducing the Original Baseline
 
-The benchmark visualization is saved as:
+The original unoptimized implementation is preserved in the Git tag `unit3-baseline` (commit `ededf3b`).
 
-`results/figures/optimization_runtime_comparison.png`
+To reproduce the controlled comparison, create an independent Git worktree alongside the main project directory:
 
-The performance measurements should be interpreted in the context of the reported execution environment and experimental design.
+```bash
+git worktree add --detach ../stats607-unit3-baseline unit3-baseline
+```
+
+The benchmark script checks that this worktree points to the expected baseline commit.
+
+Both the baseline and optimized implementations use the same Python interpreter from the main project's virtual environment.
+
+The following thread limits are applied during controlled measurements:
+
+```bash
+OPENBLAS_NUM_THREADS=1
+OMP_NUM_THREADS=1
+MKL_NUM_THREADS=1
+```
+
+The current benchmark automation assumes a macOS environment with `/usr/bin/time -p` available.
+
+### 8.3 Reproducing the Benchmarks
+
+To rerun all five configurations with three repetitions each:
+
+```bash
+make benchmark
+```
+
+The five configurations include the original serial version, algorithmic-only serial version, parallel-only four-worker version, and combined versions with two and four workers.
+
+The parallel-only configuration is an additional experimental implementation in `src/parallel_only.py`.
+
+To regenerate reports and visualizations without rerunning the simulations:
+
+```bash
+make benchmark-report
+```
+
+This requires the existing `controlled_benchmark_raw.csv` file.
+
+### 8.4 Benchmark Outputs
+
+The controlled benchmark produces:
+
+| File | Description |
+|---|---|
+| `results/benchmarks/controlled_benchmark_raw.csv` | Individual timing measurements |
+| `results/benchmarks/controlled_benchmark_summary.csv` | Runtime summaries, CPU consumption, and speedup |
+| `results/figures/controlled_runtime_comparison.png` | Original-versus-optimized performance comparison |
+| `results/figures/controlled_cpu_tradeoff.png` | Wall-clock runtime versus aggregate CPU time |
+
+Raw simulation CSV files and binary profiler outputs are excluded from Git because they can be regenerated.
+
+Earlier exploratory benchmark results are retained separately.
+
+### 8.5 Reproducibility Considerations
+
+All simulations use the same experimental design and master random seed.
+
+Full-result regression validation confirmed numerical agreement between the original and optimized implementations across 25,200 simulation records within the specified tolerance.
+
+Wall-clock benchmark measurements may vary across systems and executions because of hardware differences, background workloads, operating-system scheduling, and resource contention.
+
+Reported performance improvements therefore apply to the tested computational environment rather than representing universal speedups.
 
 ## 9. Lessons Learned
 
-The most important improvement came from parallelizing independent Monte Carlo scenarios.
+This project demonstrated that optimizing a statistical simulation requires distinguishing between algorithmic efficiency, execution time, and computational resource consumption.
 
-The original profiling results showed that the simulation spent most of its time in repeated Lasso fitting and data generation. Running independent scenarios concurrently reduced overall wall-clock time without changing the statistical results.
+### 9.1 Profiling Before Optimization
 
-Precomputing lambda successfully eliminated nearly all redundant regularization-parameter calculations but had little observable effect on total runtime. This was expected because the original operation accounted for a very small fraction of the simulation time.
+The original profiling results identified Lasso fitting and data generation as the dominant computational bottlenecks.
 
-The sparse-support experiment was particularly informative. Although it reduced the theoretical number of arithmetic operations, the additional memory-access costs made it slower in practice.
+These results helped prioritize optimization strategies and avoid spending excessive effort on operations with negligible contributions to total runtime.
 
-Similarly, Fortran-contiguous storage improved some isolated Lasso fitting benchmarks but did not produce a convincing full-simulation improvement.
+### 9.2 Algorithmic Improvements Do Not Always Produce Significant Speedups
 
-Overall, this project demonstrated that computational complexity, profiler measurements, and end-to-end wall-clock performance provide different but complementary information.
+Precomputing the Lasso regularization parameter reduced the number of calls to `calculate_lambda()` from 25,200 to 126.
 
-The most effective optimization strategy is to identify dominant bottlenecks, optimize them selectively, benchmark representative workloads, and verify correctness after every change.
+However, the controlled serial benchmark showed almost no change in overall runtime:
+
+- Original serial median: 75.87 seconds.
+- Algorithmic-only median: 75.73 seconds.
+
+The observed difference was too small to establish a meaningful improvement.
+
+This result illustrates Amdahl's Law: optimizing a small fraction of total execution time has limited impact on overall performance.
+
+### 9.3 Parallelization Was the Main Source of Performance Improvement
+
+Scenario-level parallelization allowed independent Monte Carlo simulations to execute concurrently.
+
+The combined four-worker implementation reduced median wall-clock runtime from 75.87 to 31.93 seconds.
+
+This represents approximately 2.38x speedup and a 57.9% reduction in elapsed time.
+
+The optimization preserved the statistical simulation design and produced results consistent with the original implementation.
+
+### 9.4 Faster Execution Can Require More CPU Resources
+
+The combined four-worker implementation increased median aggregate CPU time from 75.42 to 121.75 seconds.
+
+Two workers provided a smaller speedup but substantially better parallel efficiency.
+
+Consequently, the preferred worker count depends on whether the objective is to minimize elapsed time or computational resource consumption.
+
+### 9.5 Microbenchmarks Must Be Validated End-to-End
+
+Experiments involving sparse-support matrix multiplication and Fortran-contiguous array storage demonstrated that theoretically attractive or locally faster operations do not necessarily improve the complete simulation.
+
+The final implementation retained only modifications supported by correctness checks and meaningful performance evidence.
+
+### 9.6 Overall Conclusion
+
+The principal contribution of this optimization project is a reproducible, parallel simulation workflow that substantially reduces time-to-completion while preserving the statistical results.
+
+The experiments emphasize the importance of profiling, controlled benchmarking, regression testing, and explicit evaluation of performance trade-offs.

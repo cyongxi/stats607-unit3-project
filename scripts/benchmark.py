@@ -1,130 +1,211 @@
 
-"""Benchmark serial and parallel Lasso simulations."""
+"""Reproducible baseline-versus-optimized simulation benchmarks."""
 
+import argparse
 import os
-
-# Set thread limits before importing NumPy or scikit-learn.
-for name in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
-    os.environ[name] = "1"
-
+import re
 import subprocess
 import sys
-import time
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 
 
-OUTPUT_DIR = Path("results/benchmarks")
-FIGURE_DIR = Path("results/figures")
+ROOT = Path(__file__).resolve().parents[1]
+BASELINE = ROOT.parent / "stats607-unit3-baseline"
+OUTPUT_DIR = ROOT / "results" / "benchmarks"
+
+RAW_PATH = OUTPUT_DIR / "controlled_benchmark_raw.csv"
+SUMMARY_PATH = OUTPUT_DIR / "controlled_benchmark_summary.csv"
+
 REPEATS = 3
 
-CONFIGURATIONS = [
-    ("serial", [sys.executable, "-m", "src.simulation"]),
-    ("parallel_2", [
-        sys.executable, "-m", "src.parallel", "--workers", "2"
-    ]),
-    ("parallel_4", [
-        sys.executable, "-m", "src.parallel", "--workers", "4"
-    ]),
-]
+CONFIGURATIONS = {
+    "original": (BASELINE, ["-m", "src.simulation"]),
+    "algorithmic_only": (ROOT, ["-m", "src.simulation"]),
+    "parallel_only_4": (
+        ROOT, ["-m", "src.parallel_only", "--workers", "4"]
+    ),
+    "combined_2": (
+        ROOT, ["-m", "src.parallel", "--workers", "2"]
+    ),
+    "combined_4": (
+        ROOT, ["-m", "src.parallel", "--workers", "4"]
+    ),
+}
+
+ORDER = list(CONFIGURATIONS)
 
 
-def main():
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    FIGURE_DIR.mkdir(parents=True, exist_ok=True)
+def check_setup():
+    """Validate the independent baseline and required sources."""
+    if not BASELINE.is_dir():
+        raise FileNotFoundError(
+            f"Baseline worktree not found: {BASELINE}"
+        )
 
-    records = []
-    env = os.environ.copy()
+    baseline_commit = subprocess.check_output(
+        ["git", "-C", str(BASELINE), "rev-parse", "HEAD"],
+        text=True,
+    ).strip()
 
-    for repeat in range(REPEATS):
-        for name, command in CONFIGURATIONS:
-            print(
-                f"Benchmark {name}, repeat {repeat + 1}/{REPEATS}",
-                flush=True,
-            )
+    expected_commit = subprocess.check_output(
+        ["git", "-C", str(ROOT), "rev-parse", "unit3-baseline"],
+        text=True,
+    ).strip()
 
-            start = time.perf_counter()
+    if baseline_commit != expected_commit:
+        raise RuntimeError(
+            "Baseline worktree is not at the unit3-baseline tag."
+        )
 
-            with open(
-                OUTPUT_DIR / f"{name}_run_{repeat + 1}.log", "w"
-            ) as logfile:
-                subprocess.run(
-                    command,
-                    check=True,
-                    stdout=logfile,
-                    stderr=subprocess.STDOUT,
-                    env=env,
-                )
+    for filename in (
+        "src/simulation.py",
+        "src/parallel.py",
+        "src/parallel_only.py",
+    ):
+        if not (ROOT / filename).is_file():
+            raise FileNotFoundError(ROOT / filename)
 
-            elapsed = time.perf_counter() - start
 
-            records.append({
-                "configuration": name,
-                "repeat": repeat + 1,
-                "runtime_seconds": elapsed,
-            })
+def run_one(name, repeat, env):
+    """Run one full simulation and capture time(1) measurements."""
+    cwd, arguments = CONFIGURATIONS[name]
+    command = ["/usr/bin/time", "-p", sys.executable] + arguments
+    logfile = OUTPUT_DIR / f"controlled_auto_{name}_run{repeat}.log"
 
-            print(f"Completed in {elapsed:.3f} seconds")
+    print(f"Running {name}: {repeat}/{REPEATS}", flush=True)
 
-    raw = pd.DataFrame(records)
-    raw.to_csv(
-        OUTPUT_DIR / "optimization_benchmark_raw.csv",
-        index=False,
+    with logfile.open("w") as output:
+        subprocess.run(
+            command,
+            cwd=cwd,
+            env=env,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            check=True,
+        )
+
+    content = logfile.read_text()
+
+    if "Completed 25200 replications." not in content:
+        raise RuntimeError(f"Incomplete simulation: {logfile}")
+
+    values = {}
+    for metric in ("real", "user", "sys"):
+        matches = re.findall(
+            rf"^{metric}\s+([0-9.]+)\s*$",
+            content,
+            flags=re.MULTILINE,
+        )
+        if len(matches) != 1:
+            raise ValueError(f"Invalid {metric} in {logfile}")
+        values[metric] = float(matches[0])
+
+    print(f"  Wall time: {values['real']:.2f}s", flush=True)
+
+    return {
+        "configuration": name,
+        "run": repeat,
+        **values,
+        "cpu_total": values["user"] + values["sys"],
+    }
+
+
+def summarize(raw):
+    """Calculate runtime, CPU cost, and baseline-relative speedup."""
+    expected = {
+        (name, repeat)
+        for name in ORDER
+        for repeat in range(1, REPEATS + 1)
+    }
+    observed = set(
+        zip(raw["configuration"], raw["run"])
     )
 
+    if observed != expected or len(raw) != len(expected):
+        raise ValueError("Expected exactly 15 benchmark records.")
+
     summary = (
-        raw.groupby("configuration")["runtime_seconds"]
+        raw.groupby("configuration")
         .agg(
-            median="median",
-            mean="mean",
-            min="min",
-            max="max",
+            median_real=("real", "median"),
+            mean_real=("real", "mean"),
+            min_real=("real", "min"),
+            max_real=("real", "max"),
+            median_cpu=("cpu_total", "median"),
         )
+        .reindex(ORDER)
         .reset_index()
     )
 
     baseline = summary.loc[
-        summary["configuration"] == "serial", "median"
+        summary["configuration"] == "original",
+        "median_real",
     ].iloc[0]
 
-    summary["speedup"] = baseline / summary["median"]
-
-    summary.to_csv(
-        OUTPUT_DIR / "optimization_benchmark_summary.csv",
-        index=False,
+    summary["speedup"] = baseline / summary["median_real"]
+    summary["runtime_reduction_pct"] = (
+        100 * (1 - summary["median_real"] / baseline)
     )
 
-    fig, ax = plt.subplots(figsize=(8, 5))
+    return summary
 
-    ax.bar(
-        summary["configuration"],
-        summary["median"],
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--report-only",
+        action="store_true",
+        help="Regenerate reports from existing controlled CSV.",
+    )
+    args = parser.parse_args()
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    if args.report_only:
+        if not RAW_PATH.is_file():
+            raise FileNotFoundError(RAW_PATH)
+        print("Using existing controlled benchmark results.")
+        raw = pd.read_csv(RAW_PATH)
+
+    else:
+        check_setup()
+
+        env = os.environ.copy()
+        for key in (
+            "OPENBLAS_NUM_THREADS",
+            "OMP_NUM_THREADS",
+            "MKL_NUM_THREADS",
+        ):
+            env[key] = "1"
+
+        records = []
+
+        # Rotate configuration order across repetitions.
+        for repeat in range(1, REPEATS + 1):
+            offset = (repeat - 1) % len(ORDER)
+            run_order = ORDER[offset:] + ORDER[:offset]
+
+            for name in run_order:
+                records.append(run_one(name, repeat, env))
+
+        raw = pd.DataFrame(records)
+        raw.to_csv(RAW_PATH, index=False)
+
+    summary = summarize(raw)
+    summary.to_csv(SUMMARY_PATH, index=False)
+
+    print("\nControlled Benchmark Summary:")
+    print(summary.round(3).to_string(index=False))
+
+    subprocess.run(
+        [sys.executable, "-m", "scripts.plot_controlled_benchmark"],
+        cwd=ROOT,
+        check=True,
     )
 
-    ax.set_ylabel("Median wall-clock runtime (seconds)")
-    ax.set_xlabel("Execution configuration")
-    ax.set_title("Serial vs Parallel Simulation Runtime")
-
-    for i, row in summary.iterrows():
-        ax.text(
-            i,
-            row["median"] + 1,
-            f'{row["median"]:.2f}s',
-            ha="center",
-        )
-
-    fig.tight_layout()
-    fig.savefig(
-        FIGURE_DIR / "optimization_runtime_comparison.png",
-        dpi=200,
-    )
-    plt.close(fig)
-
-    print("\nBenchmark summary:")
-    print(summary.to_string(index=False))
+    print("\nBenchmark reporting completed.")
 
 
 if __name__ == "__main__":
