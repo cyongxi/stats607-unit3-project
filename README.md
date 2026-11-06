@@ -50,7 +50,7 @@ The implementation modifies `src/simulation.py` and `src/methods.py`, while pres
 
 Profiling confirmed that `calculate_lambda()` calls decreased from 25,200 to 126, representing a 99.5% reduction.
 
-However, controlled benchmarking showed that this optimization produced a negligible improvement in overall runtime because regularization-parameter calculation accounted for only a small fraction of the original computational workload.
+However, the final controlled benchmark did not demonstrate a meaningful end-to-end speedup from lambda precomputation alone. The algorithmic-only median runtime was 76.83 seconds, compared with 75.07 seconds for the original implementation. This difference does not establish a systematic slowdown.
 
 ### 2. Parallelization — Scenario-Level Multiprocessing
 
@@ -384,9 +384,16 @@ The controlled measurements provide a direct comparison between the original imp
 
 However, runtime measurements remain subject to external factors, including operating-system scheduling, processor frequency, thermal behavior, background workloads, and resource contention.
 
-The configurations in the manually collected controlled benchmark were executed in separate batches rather than a fully randomized experiment.
 
-The benchmark automation supports a rotating configuration order for future measurements, but the reported results correspond to the recorded runs.
+The final controlled benchmark was executed using the automated
+`make benchmark` pipeline. The five configurations were evaluated
+with three repetitions each, using a rotating configuration
+order across repetitions.
+
+Although this rotation helps reduce systematic order effects,
+the experiment was not fully randomized. Runtime measurements
+may still be influenced by system load, thermal conditions,
+and operating-system scheduling.
 
 The reported speedups should therefore be interpreted as empirical results for the tested computational environment rather than universal performance guarantees.
 
