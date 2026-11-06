@@ -263,11 +263,11 @@ It was benchmarked three times using the same Python environment and numerical-l
 
 | Run | Wall-clock Runtime |
 |---|---:|
-| 1 | 77.36 s |
-| 2 | 75.58 s |
-| 3 | 75.87 s |
+| 1 | 74.75 s |
+| 2 | 75.07 s |
+| 3 | 76.88 s |
 
-**Median original baseline runtime: 75.87 seconds.**
+**Median original baseline runtime: 75.07 seconds.**
 
 These measurements cover the full simulation stage, not the subsequent analysis and figure-generation stages.
 
@@ -279,11 +279,11 @@ All configurations used the same Python environment, simulation design, master s
 
 | Configuration | Median Real (s) | Median CPU (s) | Speedup |
 |---|---:|---:|---:|
-| Original Serial | 75.87 | 75.42 | 1.000x |
-| Algorithmic-only | 75.73 | 75.23 | 1.002x |
-| Parallel-only (4 workers) | 31.19 | 118.88 | 2.433x |
-| Combined (2 workers) | 44.20 | 85.31 | 1.717x |
-| Combined (4 workers) | 31.93 | 121.75 | 2.376x |
+| Original Serial | 75.07 | 74.78 | 1.000x |
+| Algorithmic-only | 76.83 | 75.80 | 0.977x |
+| Parallel-only (4 workers) | 30.50 | 115.86 | 2.461x |
+| Combined (2 workers) | 45.10 | 88.25 | 1.665x |
+| Combined (4 workers) | 31.87 | 121.35 | 2.356x |
 
 Speedup is calculated as:
 
@@ -293,20 +293,20 @@ Speedup is calculated as:
 {\text{Optimized median runtime}}
 \]
 
-The combined four-worker implementation reduced the median wall-clock runtime from **75.87 to 31.93 seconds**.
+The combined four-worker implementation reduced the median wall-clock runtime from **75.07 to 31.87 seconds**.
 
 This corresponds to:
 
-- **2.38x speedup**
-- **57.9% reduction in elapsed runtime**
+- **2.36x speedup**
+- **57.5% reduction in elapsed runtime**
 
 Parallelization was the primary source of performance improvement.
 
-Lambda precomputation alone reduced median runtime from 75.87 to 75.73 seconds, an observed difference of only approximately 0.2%.
+Algorithmic-only execution had a median runtime of 76.83 seconds versus 75.07 seconds for the original. The observed 2.3% increase does not establish a systematic slowdown or a meaningful speedup.
 
 This small difference does not establish a meaningful standalone performance improvement.
 
-The parallel-only four-worker configuration had a slightly lower observed median runtime than the combined four-worker configuration. However, the difference is small relative to run-to-run variability, and the experiments were not fully randomized.
+The parallel-only four-worker configuration had a lower observed median runtime than the combined four-worker configuration (30.50 versus 31.87 seconds). However, the difference is small relative to run-to-run variability, and the experiments were not fully randomized.
 
 Consequently, the measurements do not establish that lambda precomputation negatively affects parallel performance.
 
@@ -332,14 +332,14 @@ Aggregate CPU time is computed as `user + sys` for each run.
 
 | Configuration | Median Wall-clock (s) | Median CPU Time (s) |
 |---|---:|---:|
-| Original Serial | 75.87 | 75.42 |
-| Combined (2 workers) | 44.20 | 85.31 |
-| Combined (4 workers) | 31.93 | 121.75 |
+| Original Serial | 75.07 | 74.78 |
+| Combined (2 workers) | 45.10 | 88.25 |
+| Combined (4 workers) | 31.87 | 121.35 |
 
 Compared with the original serial version:
 
-- **Two workers:** 41.7% shorter wall-clock time and approximately 13.1% more aggregate CPU time.
-- **Four workers:** 57.9% shorter wall-clock time and approximately 61.4% more aggregate CPU time.
+- **Two workers:** 39.9% shorter wall-clock time and approximately 18.0% more aggregate CPU time.
+- **Four workers:** 57.5% shorter wall-clock time and approximately 62.3% more aggregate CPU time.
 
 ![CPU resource trade-off](results/figures/controlled_cpu_tradeoff.png)
 
@@ -353,8 +353,8 @@ where \(T_1\) is the original serial median runtime and \(T_p\) is the median ru
 
 | Configuration | Speedup | Parallel Efficiency |
 |---|---:|---:|
-| Combined (2 workers) | 1.717x | 85.8% |
-| Combined (4 workers) | 2.376x | 59.4% |
+| Combined (2 workers) | 1.665x | 83.2% |
+| Combined (4 workers) | 2.356x | 58.9% |
 
 Four workers provided faster completion, whereas two workers provided better parallel efficiency and lower aggregate CPU consumption.
 
@@ -533,9 +533,9 @@ These exploratory results are not the primary basis for the final reported speed
 
 The project produced five main findings.
 
-1. **Parallelization provided the largest runtime improvement.** The combined four-worker implementation reduced median wall-clock runtime from 75.87 to 31.93 seconds, achieving approximately 2.38x speedup and a 57.9% reduction in elapsed time.
+1. **Parallelization provided the largest runtime improvement.** The combined four-worker implementation reduced median wall-clock runtime from 75.07 to 31.87 seconds, achieving approximately 2.36x speedup and a 57.5% reduction in elapsed time.
 
-2. **Algorithmic precomputation eliminated redundant work but produced negligible overall acceleration.** Lambda calculations decreased by 99.5%, while the controlled serial runtime remained approximately unchanged.
+2. **Algorithmic precomputation reduced redundant computation but did not demonstrate a meaningful end-to-end speedup.** Lambda calculations decreased by 99.5%, while the algorithmic-only median runtime was 76.83 seconds compared with 75.07 seconds for the original implementation. The observed difference does not establish a systematic performance slowdown.
 
 3. **Parallel execution introduced a resource trade-off.** The four-worker implementation completed the simulation fastest but required substantially greater aggregate CPU time. The two-worker version provided better parallel efficiency.
 

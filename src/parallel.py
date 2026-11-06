@@ -44,6 +44,7 @@ def run_scenario(task):
             y=data["y"],
             k=k,
             sigma=sigma,
+            lam=lam,
         )
 
         success = exact_recovery(
