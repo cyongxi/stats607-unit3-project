@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from src.dgps import generate_data
-from src.methods import fit_lasso
+from src.methods import calculate_lambda, fit_lasso
 from src.metrics import exact_recovery
 
 
@@ -125,3 +125,78 @@ def test_parallel_matches_serial_across_scenarios():
         rtol=1e-10,
         atol=1e-10,
     )
+
+@pytest.mark.parametrize(
+    "n,p,k",
+    [
+        (100, 128, 10),
+        (200, 256, 30),
+        (400, 512, 60),
+    ],
+)
+def test_precomputed_lambda_matches_original_lasso(n, p, k):
+    """Precomputing lambda must not change Lasso estimates."""
+    rng = np.random.default_rng(6072026)
+
+    data = generate_data(
+        n=n,
+        p=p,
+        k=k,
+        sigma=0.5,
+        beta_min=0.5,
+        rng=rng,
+    )
+
+    # Original behavior: calculate lambda inside fit_lasso().
+    original_fit = fit_lasso(
+        X=data["X"],
+        y=data["y"],
+        k=k,
+        sigma=0.5,
+    )
+
+    # Optimized behavior: calculate lambda once and pass it in.
+    lam = calculate_lambda(n, p, k, sigma=0.5)
+
+    optimized_fit = fit_lasso(
+        X=data["X"],
+        y=data["y"],
+        k=k,
+        sigma=0.5,
+        lam=lam,
+    )
+
+    np.testing.assert_allclose(
+        original_fit["beta_hat"],
+        optimized_fit["beta_hat"],
+        rtol=1e-10,
+        atol=1e-10,
+    )
+
+    np.testing.assert_allclose(
+        original_fit["lambda_n"],
+        optimized_fit["lambda_n"],
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+    assert original_fit["n_iter"] == optimized_fit["n_iter"]
+
+    np.testing.assert_allclose(
+        original_fit["dual_gap"],
+        optimized_fit["dual_gap"],
+        rtol=1e-10,
+        atol=1e-10,
+    )
+
+    original_success = exact_recovery(
+        original_fit["beta_hat"],
+        data["beta_true"],
+    )
+
+    optimized_success = exact_recovery(
+        optimized_fit["beta_hat"],
+        data["beta_true"],
+    )
+
+    assert original_success == optimized_success

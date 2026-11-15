@@ -244,7 +244,15 @@ Algorithmic-only execution was 2.3% slower in observed median wall-clock time. T
 
 The parallel-only four-worker configuration achieved a lower observed median runtime than the corrected combined four-worker configuration (30.50 versus 31.87 seconds). However, the difference is small relative to run-to-run variability and does not establish a reliable additional speedup from lambda precomputation.
 
-The experiments were conducted sequentially rather than fully randomized. Consequently, temperature, operating-system scheduling, and background activity may have influenced the measurements.
+The final controlled benchmark was executed using the automated
+`make benchmark` pipeline. The five configurations were evaluated
+with three repetitions each, using a rotating configuration order
+across repetitions.
+
+Although this rotation helps reduce systematic ordering effects,
+the experiment was not fully randomized. Runtime measurements
+may still be affected by operating-system scheduling, processor
+temperature, and background activity.
 
 The parallel-only configuration specifically removes lambda precomputation while retaining some scenario-level parameter caching; it should not be interpreted as a complete isolation of every algorithmic modification.
 
@@ -371,7 +379,7 @@ These experiments illustrate that local performance improvements do not necessar
 
 ## 6. Regression Tests and Correctness
 
-The project includes 15 automated tests covering data generation, Lasso estimation, support recovery, reproducibility, and serial-parallel equivalence.
+The project includes 18 automated tests covering data generation, Lasso estimation, support recovery, reproducibility, serial-parallel equivalence, and numerical equivalence between precomputed and internally calculated regularization parameters.
 
 The complete test suite was executed using:
 
@@ -379,7 +387,7 @@ The complete test suite was executed using:
 make test
 ```
 
-All 15 tests passed.
+All 18 tests passed.
 
 Additional full-simulation validations compared the original serial results with the optimized versions across all 25,200 replications.
 
@@ -394,6 +402,43 @@ The comparisons included:
 The comparisons passed using numerical tolerances of `rtol=1e-10` and `atol=1e-10`.
 
 These validations support the conclusion that the implemented optimizations preserved the recorded statistical results for the tested simulation design.
+
+### 6.1 Reproducible Baseline Regression Validation
+
+To make the original-versus-optimized comparison independently
+reproducible, an automated validation script was added in
+`scripts/validate_baseline.py`.
+
+The script runs the original Unit 2 implementation preserved
+at Git tag `unit3-baseline` (commit `ededf3b`) and the optimized
+Unit 3 serial implementation in separate Python processes.
+
+Both implementations use the same Python interpreter, master
+random seed (`6072026`), selected scenarios, and replication
+counts. This ensures that the comparison does not accidentally
+mix imported modules from the two implementations.
+
+The lightweight validation selects three scenarios representing
+the linear, sublinear, and fractional-power sparsity regimes,
+with three replications per scenario.
+
+The resulting nine replication-level records are compared using
+`pandas.testing.assert_frame_equal()` with `rtol=1e-10`
+and `atol=1e-10`.
+
+The validation can be reproduced using:
+
+```bash
+make regression-baseline
+```
+
+**Result:** All nine records agreed within the specified
+numerical tolerances.
+
+This automated check complements the previously completed
+full-simulation validation across all 25,200 replication-level
+records. It is kept separate from `make test` to preserve a
+fast default test suite.
 
 ## 7. Numerical Stability
 
@@ -430,6 +475,7 @@ The project uses a Makefile to automate simulation, profiling, benchmarking, tes
 | `make benchmark-report` | Regenerate benchmark summaries and figures from existing measurements |
 | `make stability-check` | Examine warnings, convergence, and numerical stability |
 | `make test` | Run automated correctness and regression tests |
+| `make regression-baseline` | Compare original Unit 2 and optimized Unit 3 simulation outputs |
 
 ### 8.2 Reproducing the Original Baseline
 
@@ -514,8 +560,7 @@ These results helped prioritize optimization strategies and avoid spending exces
 
 Precomputing the Lasso regularization parameter reduced the number of calls to `calculate_lambda()` from 25,200 to 126.
 
-However, the controlled serial benchmark showed almost no change in overall runtime:
-
+The controlled serial benchmark did not demonstrate a meaningful end-to-end speedup from lambda precomputation.
 - Original serial median: 75.07 seconds.
 - Algorithmic-only median: 76.83 seconds.
 

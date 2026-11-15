@@ -26,14 +26,20 @@ complexity:
 
 clean:
 	rm -f results/raw/simulation_results.csv
+	rm -f results/raw/pilot_results.csv
+	rm -f results/raw/parallel_results.csv
 	rm -f results/recovery_summary.csv
-	rm -f results/figures/*.png
+	rm -f results/figures/recovery_curves.png
+	rm -f results/figures/solver_diagnostics.png
 
 benchmark:
 	$(PYTHON) -m scripts.benchmark
 
 benchmark-report:
 	$(PYTHON) -m scripts.benchmark --report-only
+
+regression-baseline:
+	$(PYTHON) -m scripts.validate_baseline
 
 profile:
 	mkdir -p results/profiling

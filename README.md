@@ -50,7 +50,7 @@ The implementation modifies `src/simulation.py` and `src/methods.py`, while pres
 
 Profiling confirmed that `calculate_lambda()` calls decreased from 25,200 to 126, representing a 99.5% reduction.
 
-However, the final controlled benchmark did not demonstrate a meaningful end-to-end speedup from lambda precomputation alone. The algorithmic-only median runtime was 76.83 seconds, compared with 75.07 seconds for the original implementation. This difference does not establish a systematic slowdown.
+However, the final controlled benchmark did not demonstrate a meaningful end-to-end speedup from lambda precomputation alone. The algorithmic-only median runtime was 76.83 seconds, compared with 75.07 seconds for the original implementation. This is consistent with profiling evidence showing that regularization-parameter calculation accounted for only a small fraction of the computational workload.
 
 ### 2. Parallelization — Scenario-Level Multiprocessing
 
@@ -179,6 +179,7 @@ make clean
 | `make parallel` | Run the combined simulation using four workers |
 | `make stability-check` | Examine numerical warnings and convergence diagnostics |
 | `make test` | Run automated correctness and regression tests |
+| `make regression-baseline` | Compare original Unit 2 and optimized Unit 3 simulation outputs |
 | `make pilot` | Run a small serial pilot |
 
 ### Reproducing the Controlled Benchmark
@@ -384,22 +385,21 @@ The controlled measurements provide a direct comparison between the original imp
 
 However, runtime measurements remain subject to external factors, including operating-system scheduling, processor frequency, thermal behavior, background workloads, and resource contention.
 
-
 The final controlled benchmark was executed using the automated
 `make benchmark` pipeline. The five configurations were evaluated
-with three repetitions each, using a rotating configuration
-order across repetitions.
+with three repetitions each, using a rotating configuration order
+across repetitions.
 
-Although this rotation helps reduce systematic order effects,
+Although this rotation helps reduce systematic ordering effects,
 the experiment was not fully randomized. Runtime measurements
-may still be influenced by system load, thermal conditions,
-and operating-system scheduling.
+may still be affected by operating-system scheduling, processor
+temperature, and background activity.
 
 The reported speedups should therefore be interpreted as empirical results for the tested computational environment rather than universal performance guarantees.
 
 ## Correctness and Numerical Stability
 
-The project includes 15 automated tests covering:
+The project includes 18 automated tests covering:
 
 - Data generation and reproducibility
 - Regularization parameter calculations
@@ -407,6 +407,7 @@ The project includes 15 automated tests covering:
 - Signed-support recovery
 - Numerical consistency
 - Serial-parallel equivalence
+- Numerical equivalence between internally calculated and precomputed Lasso regularization parameters
 
 Run the test suite:
 
@@ -414,7 +415,7 @@ Run the test suite:
 make test
 ```
 
-All 15 automated tests passed in the tested environment.
+All 18 automated tests passed in the tested environment.
 
 Additional full-simulation regression checks compared 25,200 replication-level records from the original and optimized implementations.
 
@@ -431,6 +432,36 @@ pd.testing.assert_frame_equal(
 ```
 
 The recorded simulation outputs agreed within these tolerances.
+
+### Reproducible Baseline Regression Validation
+
+A lightweight, independently reproducible regression check is
+provided in `scripts/validate_baseline.py`.
+
+The script runs the original Unit 2 baseline (Git tag
+`unit3-baseline`, commit `ededf3b`) and the optimized Unit 3
+serial implementation in separate Python processes using the
+same interpreter, master random seed, and scenario selection.
+
+Three scenarios representing different sparsity regimes are
+evaluated, with three replications per scenario. All nine
+replication-level records are compared using
+`pandas.testing.assert_frame_equal()` with `rtol=1e-10`
+and `atol=1e-10`.
+
+Run the validation using:
+
+```bash
+make regression-baseline
+```
+
+**Result:** All nine records agreed within the specified
+numerical tolerances.
+
+The command requires the baseline Git worktree at
+`../stats607-unit3-baseline`. This check complements the
+previously completed full-simulation comparison of 25,200
+records without increasing the runtime of the default test suite.
 
 ### Numerical Stability
 
@@ -475,7 +506,8 @@ stats607-unit3-project/
 │   ├── complexity.py
 │   ├── benchmark.py
 │   ├── plot_controlled_benchmark.py
-│   └── stability_check.py
+│   ├── stability_check.py
+│   └── validate_baseline.py
 ├── tests/
 │   ├── test_dgps.py
 │   ├── test_methods.py
@@ -544,7 +576,7 @@ The project produced five main findings.
 
 2. **Algorithmic precomputation reduced redundant computation but did not demonstrate a meaningful end-to-end speedup.** Lambda calculations decreased by 99.5%, while the algorithmic-only median runtime was 76.83 seconds compared with 75.07 seconds for the original implementation. The observed difference does not establish a systematic performance slowdown.
 
-3. **Parallel execution introduced a resource trade-off.** The four-worker implementation completed the simulation fastest but required substantially greater aggregate CPU time. The two-worker version provided better parallel efficiency.
+3. **Parallel execution introduced a resource trade-off.** The parallel-only four-worker configuration achieved the lowest observed median runtime (30.50 seconds). Among the combined configurations, four workers were faster than two workers, while two workers provided better parallel efficiency and lower aggregate CPU consumption.
 
 4. **Microbenchmark improvements did not always translate into end-to-end improvements.** Sparse-support matrix multiplication and Fortran-contiguous memory layout were not retained because they failed to demonstrate convincing full-simulation benefits.
 
