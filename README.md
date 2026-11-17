@@ -2,99 +2,96 @@
 
 ## Overview
 
-This project improves the computational efficiency of the Lasso signed-support recovery simulation developed for the STATS 607 Unit 2 Project.
+This project optimizes the Lasso signed-support recovery simulation developed for the STATS 607 Unit 2 Project.
 
-The original simulation reproduces Figure 2 of Wainwright (2009), which investigates sharp thresholds for exact signed-support recovery in high-dimensional linear regression.
+The original study reproduces Figure 2 of Wainwright (2009), which investigates thresholds for exact signed-support recovery in high-dimensional linear regression.
 
-The Unit 3 project focuses on computational profiling, empirical complexity analysis, algorithmic improvements, parallel execution, numerical stability, and reproducible performance benchmarking.
+Unit 3 focuses on profiling, empirical runtime scaling, elimination of redundant computations, multiprocessing, numerical stability, and reproducible benchmarking.
 
-The original statistical design and research questions are preserved. The main objective is to reduce simulation runtime without changing the statistical results.
+The statistical design is preserved. The main objective is to reduce simulation completion time while maintaining agreement with the original simulation outputs.
+
+In the controlled benchmark, the combined four-worker implementation reduced median wall-clock time from **75.07 to 31.87 seconds**, achieving **2.36× speedup** and a **57.5% reduction in elapsed time**, with increased aggregate CPU consumption.
 
 ## Simulation Design
 
-The experiment follows the Gaussian linear regression design described in Wainwright (2009).
+| Parameter | Setting |
+|---|---|
+| Dimensions | $p = 128, 256, 512$ |
+| Sparsity regimes | Linear, sublinear, and fractional-power |
+| Nonzero coefficients | +0.5 or −0.5 |
+| Noise standard deviation | 0.5 |
+| Rescaled sample size | 14 values of $\theta$ from 0.2 to 2.4 |
+| Monte Carlo replications | 200 per scenario |
+| Total workload | 126 scenarios and 25,200 Lasso fits |
+| Master random seed | 6072026 |
 
-- **Dimensions:** \(p = 128, 256, 512\)
-- **Sparsity regimes:** Linear, sublinear, and fractional-power
-- **Signal strength:** Nonzero coefficients equal to +0.5 or -0.5
-- **Noise standard deviation:** 0.5
-- **Rescaled sample size:** 14 values of theta from 0.2 to 2.4
-- **Monte Carlo replications:** 200 per scenario
-- **Total:** 126 scenarios and 25,200 Lasso fits
-- **Master random seed:** 6072026
+The complete design, including sparsity formulas, sample-size scaling, and regularization parameters, is documented in [ADEMP.md](ADEMP.md).
 
-The complete experimental design, including sparsity formulas, sample-size scaling, and regularization parameters, is documented in [ADEMP.md](ADEMP.md).
-
-The statistical results and comparison with the original paper are discussed in [ANALYSIS.md](ANALYSIS.md).
+Statistical results and comparisons with the paper are discussed in [ANALYSIS.md](ANALYSIS.md).
 
 ## Optimization Strategies
 
-Two optimization categories were implemented: algorithmic improvements and parallelization.
+### 1. Elimination of Redundant Computations
 
-### 1. Algorithmic Improvements — Eliminating Redundant Computations
+The original implementation repeatedly extracted scenario parameters and recalculated the Lasso regularization parameter within the replication loop.
 
-The original implementation repeatedly extracted scenario parameters and recalculated the Lasso regularization parameter for every Monte Carlo replication.
+The regularization parameter is:
 
-However, the regularization parameter
-
-\[
+$$
 \lambda_n =
-\sqrt{\frac{2\sigma^2\log(k)\log(p-k)}{n}}
-\]
+\sqrt{\frac{2\sigma^2\log(k)\log(p-k)}{n}}.
+$$
 
-depends only on scenario-specific parameters.
+Because its inputs are constant within a scenario, the updated implementation calculates it once per scenario and reuses it across replications.
 
-The optimized implementation calculates these parameters once per scenario and reuses them across replications.
+The changes are implemented in `src/simulation.py` and `src/methods.py`. An optional precomputed `lam` argument preserves compatibility with existing calls to `fit_lasso()`.
 
-The implementation modifies `src/simulation.py` and `src/methods.py`, while preserving compatibility with existing calls to `fit_lasso()`.
+Profiling confirmed that calls to `calculate_lambda()` decreased from 25,200 to 126, a **99.5% reduction**.
 
-Profiling confirmed that `calculate_lambda()` calls decreased from 25,200 to 126, representing a 99.5% reduction.
+This change reduces redundant work but does not change the dominant asymptotic complexity or the number of Lasso fits. The controlled benchmark did not demonstrate an end-to-end serial speedup: the algorithmic-only median was 76.83 seconds, compared with 75.07 seconds for the original implementation.
 
-However, the final controlled benchmark did not demonstrate a meaningful end-to-end speedup from lambda precomputation alone. The algorithmic-only median runtime was 76.83 seconds, compared with 75.07 seconds for the original implementation. This is consistent with profiling evidence showing that regularization-parameter calculation accounted for only a small fraction of the computational workload.
+Precomputation was retained for reduced redundancy and clearer organization, without claiming a measured runtime benefit.
 
-### 2. Parallelization — Scenario-Level Multiprocessing
+### 2. Scenario-Level Multiprocessing
 
-The original simulation executes all 126 scenarios sequentially.
+Independent scenarios are distributed across worker processes using `ProcessPoolExecutor` in `src/parallel.py`.
 
-Since the Monte Carlo scenarios are independent, the workload is suitable for parallel execution.
+The implementation preserves deterministic assignment of random streams to scenario-replication pairs and returns results in scenario order.
 
-A parallel implementation was introduced in `src/parallel.py` using Python's `ProcessPoolExecutor`.
+Worker counts are configurable through the `--workers` command-line argument. Both two-worker and four-worker configurations were evaluated.
 
-Independent scenarios are distributed across worker processes while preserving deterministic random-stream assignment and output ordering.
+The main measured improvement comes from concurrent execution of independent tasks. The total number of generated datasets and Lasso fits remains unchanged.
 
-The implementation supports configurable worker counts using the `--workers` command-line argument.
+### 3. Additional Experiments
 
-Both two-worker and four-worker configurations were evaluated.
+Two candidate modifications were evaluated but not retained:
 
-The primary optimization benefit comes from executing independent simulation tasks concurrently rather than reducing the number of Lasso fits.
+- **Sparse-support matrix multiplication:** Reduced arithmetic in the response calculation, but advanced indexing and intermediate-array operations made the tested implementation slower.
+- **Fortran-contiguous memory layout:** Produced small improvements in local conversion-and-fitting benchmarks but did not demonstrate a convincing full-simulation benefit.
 
-### 3. Additional Optimization Experiments
-
-Two additional strategies were investigated.
-
-**Sparse-support matrix multiplication:** This approach attempted to exploit the sparsity of the true coefficient vector to reduce the number of arithmetic operations. However, NumPy advanced-indexing overhead made the tested implementation slower.
-
-**Fortran-contiguous memory layout:** This approach investigated whether column-major matrix storage could improve scikit-learn's coordinate-descent performance. Although some microbenchmarks showed small improvements, the full simulation did not demonstrate a convincing performance benefit.
-
-Neither modification was retained.
-
-Detailed implementation decisions, profiling results, and trade-offs are documented in [Optimization Analysis](docs/OPTIMIZATION.md).
+See [Optimization Implementation and Performance Analysis](docs/OPTIMIZATION.md) for implementation details, experimental results, and trade-offs.
 
 ## Requirements
 
-- Python 3.11 or a compatible Python 3 version
-- GNU Make or a compatible `make` implementation
-- macOS with `/usr/bin/time -p` for the controlled benchmark automation
+- Python 3.11; the reported benchmark used Python 3.11.1.
+- GNU Make or a compatible `make` implementation.
+- macOS with `/usr/bin/time -p` for the tested controlled benchmark automation.
 
-The project uses:
+Python dependencies are listed in `requirements.txt` and include NumPy, pandas, scikit-learn, Matplotlib, and pytest.
 
-- NumPy
-- pandas
-- scikit-learn
-- matplotlib
-- pytest
+### Recorded Benchmark Environment
 
-All Python dependencies are listed in `requirements.txt`.
+The following versions were recorded for the reported measurements:
+
+| Component | Version |
+|---|---|
+| Python | 3.11.1 |
+| NumPy | 2.4.6 |
+| pandas | 3.1.0 |
+| scikit-learn | 1.9.1 |
+| Matplotlib | 3.11.2 |
+
+`requirements.txt` does not pin these exact versions. A fresh installation may therefore resolve a different environment; installing dependencies alone does not guarantee reproduction of the recorded package versions or timings.
 
 ## Setup
 
@@ -118,21 +115,11 @@ Install dependencies:
 python -m pip install -r requirements.txt
 ```
 
-The controlled benchmark measurements reported in this project were obtained using:
-
-| Package | Version |
-|---|---|
-| Python | 3.11.1 |
-| NumPy | 2.4.6 |
-| pandas | 3.1.0 |
-| scikit-learn | 1.9.1 |
-| Matplotlib | 3.11.2 |
-
-The dependency file does not pin these exact versions, so package versions may differ in a newly created environment.
+Run subsequent commands from the repository root with the environment activated.
 
 ## Running the Project
 
-### Original Simulation Pipeline
+### Serial Simulation and Analysis
 
 Run the updated serial simulation, analysis, and figure generation:
 
@@ -140,18 +127,12 @@ Run the updated serial simulation, analysis, and figure generation:
 make all
 ```
 
-Individual commands:
+Run individual stages:
 
 ```bash
 make simulate
 make analyze
 make figures
-```
-
-Run the automated tests:
-
-```bash
-make test
 ```
 
 Run a small serial pilot:
@@ -160,63 +141,73 @@ Run a small serial pilot:
 make pilot
 ```
 
+`make simulate` executes the updated Unit 3 serial implementation with scenario-level precomputation. The unmodified Unit 2 baseline is preserved separately at Git tag `unit3-baseline`.
+
+### Tests and Performance Commands
+
+| Command | Purpose |
+|---|---|
+| `make test` | Run the 27-test automated suite |
+| `make regression-baseline` | Compare 27 records across nine representative scenarios from the original and updated serial implementations |
+| `make parallel` | Run the combined four-worker simulation |
+| `make profile` | Profile the updated serial simulation |
+| `make complexity` | Analyze empirical runtime scaling |
+| `make benchmark` | Run the controlled benchmark |
+| `make benchmark-report` | Regenerate benchmark summaries and figures from existing measurements |
+| `make stability-check` | Examine warnings, convergence, and numerical diagnostics |
+
 Remove generated simulation results and figures:
 
 ```bash
 make clean
 ```
 
-**Note:** `make simulate` executes the updated serial implementation with scenario-level precomputation. It does not execute the original unmodified Unit 2 implementation.
+## Reproducing the Controlled Benchmark
 
-### Unit 3 Performance Commands
+### 1. Prepare the Original Baseline
 
-| Command | Description |
-|---|---|
-| `make profile` | Profile the updated serial simulation |
-| `make complexity` | Analyze empirical computational scaling |
-| `make benchmark` | Run the controlled baseline-versus-optimized benchmark |
-| `make benchmark-report` | Regenerate benchmark summaries and figures from saved measurements |
-| `make parallel` | Run the combined simulation using four workers |
-| `make stability-check` | Examine numerical warnings and convergence diagnostics |
-| `make test` | Run automated correctness and regression tests |
-| `make regression-baseline` | Compare original Unit 2 and optimized Unit 3 simulation outputs |
-| `make pilot` | Run a small serial pilot |
+The original unmodified implementation is preserved at Git tag `unit3-baseline` (commit `ededf3b`).
 
-### Reproducing the Controlled Benchmark
-
-The original unoptimized implementation is preserved in the Git tag `unit3-baseline` (commit `ededf3b`).
-
-The controlled benchmark uses two separate Git working directories to prevent changes to the optimized source code.
-
-First, fetch the baseline tag if necessary:
+Fetch the tag if necessary:
 
 ```bash
 git fetch origin tag unit3-baseline
 ```
 
-Then create a baseline worktree:
+Create a separate baseline worktree alongside the main repository:
 
 ```bash
 git worktree add --detach ../stats607-unit3-baseline unit3-baseline
 ```
 
-The expected directory layout is:
+The expected locations are:
 
-```text
-Desktop/
-├── stats607-unit3-project/
-│   ├── .venv/
-│   ├── src/
-│   ├── scripts/
-│   └── results/
-└── stats607-unit3-baseline/
-    ├── src/
-    └── results/
+| Directory | Purpose |
+|---|---|
+| `stats607-unit3-project/` | Updated Unit 3 source and virtual environment |
+| `stats607-unit3-baseline/` | Original Unit 2 source at the baseline tag |
+
+Both implementations use the Python interpreter from the main project's virtual environment. The benchmark checks that the baseline worktree points to the expected commit.
+
+### 2. Run the Benchmark
+
+```bash
+make benchmark
 ```
 
-Both implementations use the Python interpreter from the main Unit 3 project's virtual environment.
+The benchmark evaluates five configurations:
 
-To ensure a consistent numerical-library thread configuration, the benchmark sets:
+1. **Original:** Unmodified Unit 2 serial implementation.
+2. **Algorithmic-only:** Updated serial implementation with scenario-level parameter and lambda precomputation.
+3. **Parallel-only (4 workers):** Parallel implementation without lambda precomputation, retaining some scenario-level parameter caching.
+4. **Combined (2 workers):** Parallel execution with lambda precomputation.
+5. **Combined (4 workers):** Parallel execution with lambda precomputation.
+
+The parallel-only implementation is in `src/parallel_only.py`. Because it retains some parameter caching, it does not completely isolate every algorithmic modification.
+
+Each configuration runs three times, with a rotating configuration order across repetitions. Each run performs 25,200 Lasso fits, giving 15 full-simulation runs in total.
+
+The benchmark applies these numerical-library thread limits:
 
 ```text
 OPENBLAS_NUM_THREADS=1
@@ -224,202 +215,140 @@ OMP_NUM_THREADS=1
 MKL_NUM_THREADS=1
 ```
 
-The benchmark executes five configurations, with three full-simulation repetitions per configuration:
+Measurements use `/usr/bin/time -p` to record elapsed, user CPU, and system CPU time.
 
-1. Original serial implementation
-2. Algorithmic-only serial implementation
-3. Parallel-only implementation with four workers
-4. Combined optimization with two workers
-5. Combined optimization with four workers
+### 3. Regenerate Reports
 
-Run the complete controlled benchmark:
-
-```bash
-make benchmark
-```
-
-Each full-simulation run includes 25,200 Lasso fits. The complete benchmark therefore performs 15 full-simulation runs.
-
-The parallel-only configuration is implemented in `src/parallel_only.py`. It removes lambda precomputation but retains some scenario-level parameter caching, so it is not a complete isolation of every algorithmic change.
-
-The benchmark uses `/usr/bin/time -p` to record elapsed wall-clock time, user CPU time, and system CPU time.
-
-To regenerate summary statistics and figures without rerunning simulations:
+To regenerate summaries and figures without collecting new measurements:
 
 ```bash
 make benchmark-report
 ```
 
-The report-only command requires the existing `results/benchmarks/controlled_benchmark_raw.csv` file.
+This requires:
 
-The benchmark automation was developed and tested on macOS. Runtime measurements may differ across machines, operating systems, dependency versions, and system loads.
+`results/benchmarks/controlled_benchmark_raw.csv`
+
+The benchmark automation was developed and tested on macOS. Portability to other operating systems has not been established.
 
 ## Performance Results
 
-### 1. Original Serial Baseline
-
-The original unmodified Unit 2 implementation was recovered from the `unit3-baseline` Git tag.
-
-It was benchmarked three times using the same Python environment and numerical-library thread limits as the optimized implementations.
-
-| Run | Wall-clock Runtime |
-|---|---:|
-| 1 | 74.75 s |
-| 2 | 75.07 s |
-| 3 | 76.88 s |
-
-**Median original baseline runtime: 75.07 seconds.**
-
-These measurements cover the full simulation stage, not the subsequent analysis and figure-generation stages.
-
-### 2. Controlled Optimization Benchmark
-
-Five configurations were evaluated using three full-simulation repetitions each.
+### Controlled Benchmark
 
 All configurations used the same Python environment, simulation design, master seed, and numerical-library thread limits.
 
-| Configuration | Median Real (s) | Median CPU (s) | Speedup |
-|---|---:|---:|---:|
-| Original Serial | 75.07 | 74.78 | 1.000x |
-| Algorithmic-only | 76.83 | 75.80 | 0.977x |
-| Parallel-only (4 workers) | 30.50 | 115.86 | 2.461x |
-| Combined (2 workers) | 45.10 | 88.25 | 1.665x |
-| Combined (4 workers) | 31.87 | 121.35 | 2.356x |
+The original baseline wall-clock measurements were 74.75, 75.07, and 76.88 seconds, giving a median of **75.07 seconds**.
 
-Speedup is calculated as:
+| Configuration | Median wall time (s) | Median aggregate CPU time (s) | Speedup | Runtime reduction |
+|---|---:|---:|---:|---:|
+| Original | 75.07 | 74.78 | 1.000× | 0.0% |
+| Algorithmic-only | 76.83 | 75.80 | 0.977× | −2.3% |
+| Parallel-only (4 workers) | 30.50 | 115.86 | 2.461× | 59.4% |
+| Combined (2 workers) | 45.10 | 88.25 | 1.665× | 39.9% |
+| Combined (4 workers) | 31.87 | 121.35 | 2.356× | 57.5% |
 
-\[
-\text{Speedup} =
-\frac{\text{Original serial median runtime}}
-{\text{Optimized median runtime}}
-\]
+Speedup is calculated from median wall-clock times:
 
-The combined four-worker implementation reduced the median wall-clock runtime from **75.07 to 31.87 seconds**.
+$$
+S_c = \frac{T_{\mathrm{original}}}{T_c}.
+$$
 
-This corresponds to:
+These measurements cover the simulation stage, excluding subsequent statistical analysis and figure generation.
 
-- **2.36x speedup**
-- **57.5% reduction in elapsed runtime**
+The combined four-worker implementation achieved approximately **2.36× speedup**, reducing elapsed time by **57.5%**.
 
-Parallelization was the primary source of performance improvement.
+The parallel-only four-worker configuration had the lowest observed median runtime overall. The measurements provide no evidence of an additional runtime benefit from lambda precomputation.
 
-Algorithmic-only execution had a median runtime of 76.83 seconds versus 75.07 seconds for the original. The observed 2.3% increase does not establish a systematic slowdown or a meaningful speedup.
+The algorithmic-only median was approximately 2.3% higher than the original median. Three repetitions per configuration are insufficient to establish a reliable small performance difference or a systematic slowdown.
 
-This small difference does not establish a meaningful standalone performance improvement.
-
-The parallel-only four-worker configuration had a lower observed median runtime than the combined four-worker configuration (30.50 versus 31.87 seconds). However, the difference is small relative to run-to-run variability, and the experiments were not fully randomized.
-
-Consequently, the measurements do not establish that lambda precomputation negatively affects parallel performance.
-
-### 3. Controlled Runtime Comparison
+### Runtime Visualization
 
 ![Controlled runtime comparison](results/figures/controlled_runtime_comparison.png)
 
-The figure shows the median wall-clock runtime for each configuration.
+The figure shows median wall-clock times. Error bars represent the observed minimum-to-maximum range across three repetitions; they are not confidence intervals.
 
-Error bars represent the observed minimum-to-maximum range across the three repetitions, not standard errors or confidence intervals.
+### CPU Resource Trade-off
 
-### 4. CPU Resource Trade-off
+Aggregate CPU time is calculated as `user + sys` for each run, followed by the median across runs.
 
-Parallelization reduced actual completion time but increased aggregate CPU consumption.
+Relative to the original implementation:
 
-The measurements distinguish:
-
-- **Real:** Elapsed wall-clock time.
-- **User:** CPU time spent executing user-space code.
-- **Sys:** CPU time spent executing kernel-space operations.
-
-Aggregate CPU time is computed as `user + sys` for each run.
-
-| Configuration | Median Wall-clock (s) | Median CPU Time (s) |
-|---|---:|---:|
-| Original Serial | 75.07 | 74.78 |
-| Combined (2 workers) | 45.10 | 88.25 |
-| Combined (4 workers) | 31.87 | 121.35 |
-
-Compared with the original serial version:
-
-- **Two workers:** 39.9% shorter wall-clock time and approximately 18.0% more aggregate CPU time.
-- **Four workers:** 57.5% shorter wall-clock time and approximately 62.3% more aggregate CPU time.
+- **Combined, two workers:** 39.9% shorter elapsed time and approximately 18.0% more aggregate CPU time.
+- **Combined, four workers:** 57.5% shorter elapsed time and approximately 62.3% more aggregate CPU time.
 
 ![CPU resource trade-off](results/figures/controlled_cpu_tradeoff.png)
 
-Parallel efficiency is defined as:
+For $w$ workers, efficiency relative to the original serial baseline is:
 
-\[
-E_p = \frac{T_1}{pT_p}
-\]
+$$
+E_w = \frac{T_{\mathrm{original}}}{wT_w}.
+$$
 
-where \(T_1\) is the original serial median runtime and \(T_p\) is the median runtime with \(p\) workers.
-
-| Configuration | Speedup | Parallel Efficiency |
+| Configuration | Speedup | Efficiency relative to original baseline |
 |---|---:|---:|
-| Combined (2 workers) | 1.665x | 83.2% |
-| Combined (4 workers) | 2.356x | 58.9% |
+| Combined (2 workers) | 1.665× | 83.2% |
+| Combined (4 workers) | 2.356× | 58.9% |
 
-Four workers provided faster completion, whereas two workers provided better parallel efficiency and lower aggregate CPU consumption.
+These efficiencies compare against the original serial implementation. They are not pure scaling measurements of an otherwise identical parallel implementation.
 
-Therefore, the preferred worker count depends on whether the optimization objective emphasizes elapsed time or computational resource consumption.
+Among the combined configurations, four workers completed faster. Two workers consumed less aggregate CPU time and achieved higher efficiency relative to the original baseline.
 
-### 5. Computational Complexity
+### Empirical Runtime Scaling
 
-An empirical complexity analysis investigated runtime scaling as sample size increased.
+An empirical analysis examined runtime scaling as sample size increased.
 
-The measured log-log scaling exponents were:
-
-| Component | Empirical Exponent |
+| Component | Measured log-log exponent |
 |---|---:|
 | Data generation | 0.968 |
 | Lasso fitting | 0.406 |
 | Combined runtime | 0.585 |
 
-These values describe empirical scaling over the tested parameter range and should not be interpreted as universal theoretical complexity bounds.
+These exponents describe measured behavior over the tested range. They are not universal theoretical complexity bounds.
 
-![Baseline computational complexity](results/figures/baseline_complexity.png)
+![Baseline empirical runtime scaling](results/figures/baseline_complexity.png)
 
-For detailed methodology, see [Baseline Performance Analysis](docs/BASELINE.md).
+See [Baseline Performance Analysis](docs/BASELINE.md) for the methodology.
 
-### 6. Benchmark Interpretation
+### Interpretation and Limitations
 
-The controlled measurements provide a direct comparison between the original implementation and optimized versions under consistent numerical-library thread limits.
+The controlled benchmark used consistent software and thread settings, with a rotating configuration order to reduce systematic ordering effects.
 
-However, runtime measurements remain subject to external factors, including operating-system scheduling, processor frequency, thermal behavior, background workloads, and resource contention.
+The experiment was not fully randomized and included only three measurements per configuration. Timings may still depend on scheduling, processor frequency, thermal behavior, background workloads, and resource contention.
 
-The final controlled benchmark was executed using the automated
-`make benchmark` pipeline. The five configurations were evaluated
-with three repetitions each, using a rotating configuration order
-across repetitions.
-
-Although this rotation helps reduce systematic ordering effects,
-the experiment was not fully randomized. Runtime measurements
-may still be affected by operating-system scheduling, processor
-temperature, and background activity.
-
-The reported speedups should therefore be interpreted as empirical results for the tested computational environment rather than universal performance guarantees.
+The reported speedups are empirical results for the tested environment. Earlier exploratory timings are retained separately and are not used to calculate the final controlled speedups.
 
 ## Correctness and Numerical Stability
 
-The project includes 18 automated tests covering:
+### Automated Tests
 
-- Data generation and reproducibility
-- Regularization parameter calculations
-- Lasso fitting and output validation
-- Signed-support recovery
-- Numerical consistency
-- Serial-parallel equivalence
-- Numerical equivalence between internally calculated and precomputed Lasso regularization parameters
+The project includes 27 automated tests covering:
 
-Run the test suite:
+- Data generation and reproducibility.
+- Regularization-parameter calculations.
+- Lasso fitting and output validation.
+- Signed-support recovery.
+- Numerical consistency.
+- Serial-parallel equivalence.
+- Equivalence between internally calculated and precomputed regularization parameters.
+- Representative simulation scenarios across sparsity regimes and problem dimensions.
+- Statistical summary calculations, including recovery probabilities and Monte Carlo standard errors.
+- End-to-end analysis and figure generation.
+
+Run:
 
 ```bash
 make test
 ```
 
-All 18 automated tests passed in the tested environment.
+All 27 tests passed in the recorded test run.
 
-Additional full-simulation regression checks compared 25,200 replication-level records from the original and optimized implementations.
+### Full-Simulation Comparisons
 
-The comparisons used:
+Additional regression checks compared 25,200 replication-level records from the original and optimized implementations.
+
+The comparisons examined identifiers, recovery outcomes, regularization parameters, iteration counts, and duality gaps.
+
+Numerical comparisons used:
 
 ```python
 pd.testing.assert_frame_equal(
@@ -431,49 +360,39 @@ pd.testing.assert_frame_equal(
 )
 ```
 
-The recorded simulation outputs agreed within these tolerances.
+The recorded outputs agreed within the stated tolerances. This supports preservation of the recorded results for the tested simulation design.
 
-### Reproducible Baseline Regression Validation
+### Reproducible Baseline Regression Check
 
-A lightweight, independently reproducible regression check is
-provided in `scripts/validate_baseline.py`.
+`scripts/validate_baseline.py` provides a lightweight original-versus-updated serial comparison.
 
-The script runs the original Unit 2 baseline (Git tag
-`unit3-baseline`, commit `ededf3b`) and the optimized Unit 3
-serial implementation in separate Python processes using the
-same interpreter, master random seed, and scenario selection.
+It runs the baseline at `unit3-baseline` and the updated Unit 3 serial implementation in separate Python processes using the same interpreter, master seed, and scenario selection.
 
-Three scenarios representing different sparsity regimes are
-evaluated, with three replications per scenario. All nine
-replication-level records are compared using
-`pandas.testing.assert_frame_equal()` with `rtol=1e-10`
-and `atol=1e-10`.
+Nine representative scenarios cover the three sparsity regimes, problem dimensions $p = 128, 256, 512$, and selected values of $\theta$. With three replications per scenario, the resulting 27 records are compared using `pandas.testing.assert_frame_equal()` with `rtol=1e-10` and `atol=1e-10`.
 
-Run the validation using:
+Run:
 
 ```bash
 make regression-baseline
 ```
 
-**Result:** All nine records agreed within the specified
-numerical tolerances.
+The command requires the baseline worktree at:
 
-The command requires the baseline Git worktree at
-`../stats607-unit3-baseline`. This check complements the
-previously completed full-simulation comparison of 25,200
-records without increasing the runtime of the default test suite.
+`../stats607-unit3-baseline`
+
+All 27 records agreed in the recorded validation run.
+
+This target complements the previously completed full-simulation comparison. It does not itself validate all 25,200 records and is separate from the default test suite.
 
 ### Numerical Stability
 
-A separate stability check evaluated 27 selected scenarios with 10 replications each, totaling 270 Lasso fits.
-
-Run:
+Run the sampled stability check:
 
 ```bash
 make stability-check
 ```
 
-The observed results were:
+The recorded check evaluated 27 selected scenarios with 10 replications each:
 
 | Diagnostic | Count |
 |---|---:|
@@ -484,105 +403,85 @@ The observed results were:
 | Runs reaching maximum iterations | 0 |
 | Non-finite duality gaps | 0 |
 
-No numerical or convergence problems were observed in the sampled scenarios.
-
-These findings do not establish that numerical issues are impossible in other simulation settings.
+No numerical or convergence problems were observed in these sampled runs. This does not establish that problems are impossible in other settings.
 
 ## Project Structure
 
-```text
-stats607-unit3-project/
-├── src/
-│   ├── scenarios.py
-│   ├── dgps.py
-│   ├── methods.py
-│   ├── metrics.py
-│   ├── simulation.py
-│   ├── parallel.py
-│   ├── parallel_only.py
-│   ├── analyze.py
-│   └── figures.py
-├── scripts/
-│   ├── complexity.py
-│   ├── benchmark.py
-│   ├── plot_controlled_benchmark.py
-│   ├── stability_check.py
-│   └── validate_baseline.py
-├── tests/
-│   ├── test_dgps.py
-│   ├── test_methods.py
-│   ├── test_metrics.py
-│   └── test_regression.py
-├── docs/
-│   ├── BASELINE.md
-│   └── OPTIMIZATION.md
-├── results/
-│   ├── raw/
-│   ├── profiling/
-│   ├── benchmarks/
-│   └── figures/
-├── ADEMP.md
-├── ANALYSIS.md
-├── Makefile
-├── requirements.txt
-└── README.md
-```
+| Location | Contents |
+|---|---|
+| `src/scenarios.py` | Simulation scenarios |
+| `src/dgps.py` | Data generation |
+| `src/methods.py` | Lasso estimation and regularization |
+| `src/metrics.py` | Recovery metrics |
+| `src/simulation.py` | Updated serial simulation |
+| `src/parallel.py` | Combined parallel implementation |
+| `src/parallel_only.py` | Parallel implementation without lambda precomputation |
+| `src/analyze.py` | Statistical summaries |
+| `src/figures.py` | Statistical figures |
+| `scripts/complexity.py` | Empirical runtime-scaling analysis |
+| `scripts/benchmark.py` | Controlled benchmark automation |
+| `scripts/plot_controlled_benchmark.py` | Benchmark reports and figures |
+| `scripts/stability_check.py` | Numerical stability checks |
+| `scripts/validate_baseline.py` | Lightweight baseline regression comparison |
+| `tests/` | Automated correctness, regression, and analysis-pipeline tests |
+| `tests/test_regression.py` | Representative scenario and serial-parallel regression tests |
+| `tests/test_analysis_pipeline.py` | Statistical summaries, validation, and end-to-end analysis tests |
+| `docs/` | Baseline and optimization reports |
+| `results/` | Generated simulations, diagnostics, benchmarks, and figures |
+| `ADEMP.md` | Experimental design |
+| `ANALYSIS.md` | Statistical interpretation |
+| `Makefile` | Workflow automation |
+| `requirements.txt` | Python dependencies |
 
-Generated raw simulation files and binary profiler outputs are excluded from Git because they can be reproduced using the provided commands.
-
-Benchmark summaries, figures, and documentation provide the main reproducibility evidence.
+Generated raw simulation files and binary profiler outputs are excluded from Git because they can be regenerated. Benchmark measurements, summaries, figures, and documentation provide the recorded performance evidence.
 
 ## Main Outputs
 
-### Performance Analysis and Documentation
+### Documentation and Controlled Benchmark
 
 | File | Description |
 |---|---|
-| `docs/BASELINE.md` | Original performance profiling, runtime, complexity, and numerical diagnostics |
-| `docs/OPTIMIZATION.md` | Optimization strategies, implementation details, controlled benchmarks, and trade-offs |
-| `results/benchmarks/controlled_benchmark_raw.csv` | Individual timing records for all five controlled configurations |
-| `results/benchmarks/controlled_benchmark_summary.csv` | Median and mean runtime, CPU time, speedup, and runtime reduction |
-| `results/figures/controlled_runtime_comparison.png` | Original-versus-optimized runtime comparison |
-| `results/figures/controlled_cpu_tradeoff.png` | Wall-clock runtime and aggregate CPU consumption comparison |
-| `results/figures/baseline_complexity.png` | Empirical computational complexity visualization |
+| `docs/BASELINE.md` | Baseline profiling, runtime, scaling, and diagnostics |
+| `docs/OPTIMIZATION.md` | Implementation details, experiments, and trade-offs |
+| `results/benchmarks/controlled_benchmark_raw.csv` | Individual timing records |
+| `results/benchmarks/controlled_benchmark_summary.csv` | Runtime, CPU, speedup, and reduction summaries |
+| `results/figures/controlled_runtime_comparison.png` | Controlled runtime comparison |
+| `results/figures/controlled_cpu_tradeoff.png` | Elapsed-time and CPU comparison |
+| `results/figures/baseline_complexity.png` | Empirical runtime-scaling figure |
 
 ### Simulation and Diagnostics
 
 | File | Description |
 |---|---|
-| `results/raw/simulation_results.csv` | Serial replication-level simulation results |
-| `results/raw/parallel_results.csv` | Parallel replication-level simulation results |
-| `results/recovery_summary.csv` | Recovery probability estimates and Monte Carlo standard errors |
-| `results/benchmarks/stability_check_results.csv` | Sampled numerical stability diagnostics |
+| `results/raw/simulation_results.csv` | Serial replication-level results |
+| `results/raw/parallel_results.csv` | Parallel replication-level results |
+| `results/recovery_summary.csv` | Recovery probabilities and Monte Carlo standard errors |
+| `results/benchmarks/stability_check_results.csv` | Sampled stability diagnostics |
 | `results/benchmarks/stability_check_issues.csv` | Recorded numerical issues, if any |
 
-### Historical Benchmark Results
+### Historical Benchmark Outputs
 
-The earlier exploratory benchmark is retained separately:
+Earlier exploratory results are retained separately:
 
 | File | Description |
 |---|---|
-| `results/benchmarks/optimization_benchmark_raw.csv` | Initial serial-versus-parallel benchmark measurements |
-| `results/benchmarks/optimization_benchmark_summary.csv` | Initial performance summary |
-| `results/figures/optimization_runtime_comparison.png` | Initial performance comparison visualization |
+| `results/benchmarks/optimization_benchmark_raw.csv` | Exploratory timing measurements |
+| `results/benchmarks/optimization_benchmark_summary.csv` | Exploratory performance summary |
+| `results/figures/optimization_runtime_comparison.png` | Exploratory runtime comparison |
 
-These exploratory results are not the primary basis for the final reported speedup because they do not directly compare the unmodified Unit 2 baseline with the optimized versions.
+These files are historical evidence rather than the primary basis for the final reported speedup.
 
 ## Key Findings
 
-The project produced five main findings.
+1. **Parallelization produced the main measured improvement.** The combined four-worker implementation reduced median elapsed time from 75.07 to 31.87 seconds.
 
-1. **Parallelization provided the largest runtime improvement.** The combined four-worker implementation reduced median wall-clock runtime from 75.07 to 31.87 seconds, achieving approximately 2.36x speedup and a 57.5% reduction in elapsed time.
+2. **Precomputation removed redundancy without demonstrating a runtime benefit.** Lambda calculations decreased by 99.5%, but the dominant workload remained data generation and Lasso fitting.
 
-2. **Algorithmic precomputation reduced redundant computation but did not demonstrate a meaningful end-to-end speedup.** Lambda calculations decreased by 99.5%, while the algorithmic-only median runtime was 76.83 seconds compared with 75.07 seconds for the original implementation. The observed difference does not establish a systematic performance slowdown.
+3. **Faster completion required more CPU resources.** The combined four-worker configuration increased median aggregate CPU time by approximately 62.3%. Two workers offered lower CPU consumption and higher efficiency relative to the original baseline.
 
-3. **Parallel execution introduced a resource trade-off.** The parallel-only four-worker configuration achieved the lowest observed median runtime (30.50 seconds). Among the combined configurations, four workers were faster than two workers, while two workers provided better parallel efficiency and lower aggregate CPU consumption.
+4. **Local improvements required whole-program evaluation.** Sparse-support multiplication and Fortran-contiguous storage were not retained because the available measurements did not establish a full-simulation benefit.
 
-4. **Microbenchmark improvements did not always translate into end-to-end improvements.** Sparse-support matrix multiplication and Fortran-contiguous memory layout were not retained because they failed to demonstrate convincing full-simulation benefits.
-
-5. **Correctness and reproducibility were preserved throughout optimization.** Regression testing, deterministic random streams, numerical stability checks, and controlled benchmarking supported reliable comparisons between the implementations.
-
-Overall, this project demonstrates the importance of distinguishing theoretical complexity, computational work, elapsed execution time, and resource efficiency when optimizing statistical simulations.
+5. **Correctness comparisons supported the optimization results.** Automated tests and regression comparisons supported agreement with the original outputs, while sampled diagnostics found no numerical problems in the checked scenarios.
 
 ## Reference
 

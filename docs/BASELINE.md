@@ -32,7 +32,7 @@ Summary:
 - Maximum runtime: 76.97 seconds
 - Interquartile range: approximately 1.64 seconds, using linearly interpolated quartiles
 
-The median runtime of 73.75 seconds is used as the reference for subsequent simulation benchmarks.
+The initial three-run baseline had a median runtime of 73.75 seconds and was used for exploratory optimization comparisons. The later controlled benchmark used a separately measured original serial baseline median of 75.07 seconds. Final speedups reported in the project are calculated using the controlled baseline.
 
 These measurements cover the simulation stage (`make simulate`), not the analysis and figure-generation stages. The earlier Unit 2 record reported approximately 74.90 seconds for `make all` in its original environment; that historical measurement is reported separately because the execution scope and environment differ.
 
@@ -88,9 +88,9 @@ The experiment separately measured data generation, Lasso fitting, and their com
 
 The empirical scaling exponent was estimated by fitting:
 
-\[
+$$
 \log T(n) = a + b\log n.
-\]
+$$
 
 Results:
 
@@ -118,10 +118,10 @@ Lasso uses an iterative coordinate-descent solver, and its runtime depends on mo
 
 The regularization parameter also changes with n:
 
-\[
+$$
 \lambda_n =
 \sqrt{\frac{2\sigma^2\log(k)\log(p-k)}{n}}.
-\]
+$$
 
 Therefore, the estimated exponent of 0.406 describes the empirical behavior of this particular experiment and should not be interpreted as a general theoretical complexity bound for Lasso.
 
@@ -178,14 +178,16 @@ No numerical warnings, convergence warnings, or exceptions were observed in the 
 
 This finding applies to the 270 inspected runs and does not establish that warnings were absent from every replication in the original full simulation.
 
-## 6. Identified Bottlenecks and Next Steps
+## 6. Identified Bottlenecks and Optimization Outcomes
 
-Profiling identifies two primary optimization opportunities:
+Baseline profiling identified two primary optimization opportunities:
 
-**Data generation:** The original implementation generates a dense Gaussian design matrix and computes the response through multiplication by a sparse coefficient vector. Exploiting the known support may reduce arithmetic work, although array-copying costs and floating-point differences must be assessed.
+**Data generation:** The original implementation generates a dense Gaussian design matrix and computes the response through multiplication by a sparse coefficient vector. A sparse-support multiplication alternative was evaluated, but its additional array-indexing overhead resulted in slower performance in the tested configurations. The original multiplication method was therefore retained.
 
-**Lasso fitting:** Repeated independent model fits dominate cumulative execution time. Parallel execution across appropriately grouped simulation tasks is a promising candidate, subject to process overhead and reproducibility constraints.
+**Lasso fitting:** Repeated independent Lasso fits dominated cumulative execution time. Scenario-level multiprocessing was implemented to execute independent simulation tasks concurrently while preserving deterministic random-stream assignment.
 
-The next phase will evaluate optimizations from at least two categories, measure their performance impact, and validate that the statistical results remain equivalent to the baseline.
+Scenario-specific parameter precomputation was also implemented to eliminate redundant calculations. Although this reduced calls to `calculate_lambda()` from 25,200 to 126, controlled serial benchmarks did not demonstrate an end-to-end runtime improvement.
 
-All optimizations will be benchmarked against the preserved Unit 2 implementation and documented in `docs/OPTIMIZATION.md`.
+The controlled benchmark showed that the combined four-worker implementation reduced median wall-clock time from 75.07 to 31.87 seconds, corresponding to approximately 2.36× speedup and a 57.5% reduction in elapsed time. This improvement required increased aggregate CPU time.
+
+Correctness was evaluated using automated tests, representative baseline regression comparisons, and previously recorded full-simulation comparisons. Detailed optimization methods, controlled measurements, and numerical validation are documented in [OPTIMIZATION.md](OPTIMIZATION.md).

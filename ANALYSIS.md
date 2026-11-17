@@ -51,7 +51,7 @@ I recreated the three-panel recovery plot (`results/figures/recovery_curves.png`
 
 I also created a solver-iteration diagnostic plot (`results/figures/solver_diagnostics.png`). The maximum iteration count was 106, far below the limit of 20,000, and the maximum recorded duality gap was approximately $3.43\times10^{-6}$. These results are reassuring, although they do not guarantee exact numerical solutions.
 
-The main implementation challenge was translating the paper's mathematical definitions into consistent simulation code and investigating the differences from the original curves. I separated data generation, estimation, and evaluation into modules and checked reproducibility using a fixed seed. All 10 automated tests passed, and the full results contain 25,200 records with no missing values.
+The main implementation challenge was translating the paper's mathematical definitions into consistent simulation code and investigating the differences from the original curves. I separated data generation, estimation, and evaluation into modules and checked reproducibility using a fixed seed. All 27 automated tests passed, and the full results contain 25,200 records with no missing values.
 
 I am confident in the implementation and the overall recovery pattern, but less confident in exact numerical replication because some original computational settings remain unspecified.
 

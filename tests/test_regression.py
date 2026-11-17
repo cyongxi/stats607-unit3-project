@@ -1,12 +1,64 @@
-
 """Regression tests for Unit 3 optimization."""
 
+from itertools import product
+
 import numpy as np
+import pandas as pd
 import pytest
 
 from src.dgps import generate_data
 from src.methods import calculate_lambda, fit_lasso
 from src.metrics import exact_recovery
+from src.parallel import run_parallel
+from src.scenarios import generate_scenarios
+from src.simulation import run_simulation
+
+
+MASTER_SEED = 6072026
+
+
+def representative_scenarios():
+    """Select nine scenarios by factor values rather than row positions."""
+    design = generate_scenarios()
+
+    # Each regime covers all three dimensions and all three theta values.
+    settings = [
+        ("linear", 128, 0.2),
+        ("linear", 256, 1.0),
+        ("linear", 512, 2.4),
+        ("sublinear", 128, 1.0),
+        ("sublinear", 256, 2.4),
+        ("sublinear", 512, 0.2),
+        ("fractional", 128, 2.4),
+        ("fractional", 256, 0.2),
+        ("fractional", 512, 1.0),
+    ]
+
+    selected = []
+    for regime, p, theta in settings:
+        matches = design.loc[
+            design["regime"].eq(regime)
+            & design["p"].eq(p)
+            & np.isclose(design["theta"], theta)
+        ]
+        assert len(matches) == 1, (regime, p, theta)
+        selected.append(matches)
+
+    scenarios = pd.concat(selected, ignore_index=True)
+
+    assert len(scenarios) == 9
+    assert scenarios["scenario_id"].is_unique
+    assert set(
+        zip(scenarios["regime"], scenarios["p"])
+    ) == set(
+        product(
+            ("linear", "sublinear", "fractional"),
+            (128, 256, 512),
+        )
+    )
+    assert set(scenarios["theta"]) == {0.2, 1.0, 2.4}
+
+    return scenarios
 
 
 @pytest.mark.parametrize(
@@ -18,105 +70,87 @@ from src.metrics import exact_recovery
     ],
 )
 def test_dgp_response_consistency(n, p, k):
-    """Check that generated responses match the linear model."""
-    rng = np.random.default_rng(6072026)
-
+    """Generated responses must satisfy the specified linear model."""
     data = generate_data(
         n=n,
         p=p,
         k=k,
         sigma=0.5,
         beta_min=0.5,
-        rng=rng,
+        rng=np.random.default_rng(MASTER_SEED),
     )
 
-    X = data["X"]
-    y = data["y"]
-    beta = data["beta_true"]
-
-    # Reconstruct the exact random noise using the same random stream.
-    reference_rng = np.random.default_rng(6072026)
+    # Reconstruct noise from the documented sequence of RNG operations.
+    reference_rng = np.random.default_rng(MASTER_SEED)
     reference_rng.normal(size=(n, p))
     reference_rng.choice(p, size=k, replace=False)
     reference_rng.choice([-1.0, 1.0], size=k)
     noise = reference_rng.normal(scale=0.5, size=n)
 
-    expected_y = X @ beta + noise
-
     np.testing.assert_allclose(
-        y,
-        expected_y,
+        data["y"],
+        data["X"] @ data["beta_true"] + noise,
         rtol=1e-10,
         atol=1e-10,
     )
 
 
 def test_lasso_recovery_is_reproducible():
-    """Identical random seeds should produce identical recovery results."""
-    seed = 6072026
-
+    """Identical seeds must reproduce coefficients and recovery outcomes."""
     outputs = []
 
     for _ in range(2):
-        rng = np.random.default_rng(seed)
-
         data = generate_data(
             n=200,
             p=128,
             k=10,
             sigma=0.5,
             beta_min=0.5,
-            rng=rng,
+            rng=np.random.default_rng(MASTER_SEED),
         )
-
-        fit = fit_lasso(
+        fitted = fit_lasso(
             X=data["X"],
             y=data["y"],
             k=10,
             sigma=0.5,
         )
-
-        outputs.append({
-            "beta_hat": fit["beta_hat"],
-            "success": exact_recovery(
-                fit["beta_hat"],
-                data["beta_true"],
-            ),
-        })
+        outputs.append(
+            (
+                fitted["beta_hat"],
+                exact_recovery(
+                    fitted["beta_hat"], data["beta_true"]
+                ),
+            )
+        )
 
     np.testing.assert_allclose(
-        outputs[0]["beta_hat"],
-        outputs[1]["beta_hat"],
-        rtol=1e-12,
-        atol=1e-12,
+        outputs[0][0], outputs[1][0],
+        rtol=1e-12, atol=1e-12,
     )
-
-    assert outputs[0]["success"] == outputs[1]["success"]
+    assert outputs[0][1] == outputs[1][1]
 
 
 def test_parallel_matches_serial_across_scenarios():
-    """Parallel and serial results should match across scenarios."""
-    from src.parallel import run_parallel
-    from src.simulation import run_simulation
-    from src.scenarios import generate_scenarios
-
-    # Select scenarios with different dimensions and regimes.
-    scenarios = generate_scenarios().iloc[[0, 42, 84]]
+    """Serial and parallel outputs must agree across representative settings."""
+    scenarios = representative_scenarios()
 
     serial = run_simulation(
         scenarios,
         n_replications=3,
-        master_seed=6072026,
+        master_seed=MASTER_SEED,
     )
-
     parallel = run_parallel(
         scenarios,
         n_replications=3,
-        master_seed=6072026,
+        master_seed=MASTER_SEED,
         max_workers=2,
     )
 
-    import pandas as pd
+    assert len(serial) == len(parallel) == 27
+    assert not serial.duplicated(
+        ["scenario_id", "replication_id"]
+    ).any()
+    assert serial.groupby("scenario_id").size().eq(3).all()
 
     pd.testing.assert_frame_equal(
         serial.reset_index(drop=True),
@@ -125,6 +159,7 @@ def test_parallel_matches_serial_across_scenarios():
         rtol=1e-10,
         atol=1e-10,
     )
+
 
 @pytest.mark.parametrize(
     "n,p,k",
@@ -135,68 +170,38 @@ def test_parallel_matches_serial_across_scenarios():
     ],
 )
 def test_precomputed_lambda_matches_original_lasso(n, p, k):
-    """Precomputing lambda must not change Lasso estimates."""
-    rng = np.random.default_rng(6072026)
-
+    """Precomputing lambda must preserve estimates and solver diagnostics."""
     data = generate_data(
         n=n,
         p=p,
         k=k,
         sigma=0.5,
         beta_min=0.5,
-        rng=rng,
+        rng=np.random.default_rng(MASTER_SEED),
     )
 
-    # Original behavior: calculate lambda inside fit_lasso().
-    original_fit = fit_lasso(
+    original = fit_lasso(
+        X=data["X"], y=data["y"], k=k, sigma=0.5,
+    )
+    optimized = fit_lasso(
         X=data["X"],
         y=data["y"],
         k=k,
         sigma=0.5,
+        lam=calculate_lambda(n, p, k, sigma=0.5),
     )
 
-    # Optimized behavior: calculate lambda once and pass it in.
-    lam = calculate_lambda(n, p, k, sigma=0.5)
+    for key in ("beta_hat", "lambda_n", "dual_gap"):
+        np.testing.assert_allclose(
+            original[key],
+            optimized[key],
+            rtol=1e-10,
+            atol=1e-10,
+        )
 
-    optimized_fit = fit_lasso(
-        X=data["X"],
-        y=data["y"],
-        k=k,
-        sigma=0.5,
-        lam=lam,
+    assert original["n_iter"] == optimized["n_iter"]
+    assert exact_recovery(
+        original["beta_hat"], data["beta_true"]
+    ) == exact_recovery(
+        optimized["beta_hat"], data["beta_true"]
     )
-
-    np.testing.assert_allclose(
-        original_fit["beta_hat"],
-        optimized_fit["beta_hat"],
-        rtol=1e-10,
-        atol=1e-10,
-    )
-
-    np.testing.assert_allclose(
-        original_fit["lambda_n"],
-        optimized_fit["lambda_n"],
-        rtol=1e-12,
-        atol=1e-12,
-    )
-
-    assert original_fit["n_iter"] == optimized_fit["n_iter"]
-
-    np.testing.assert_allclose(
-        original_fit["dual_gap"],
-        optimized_fit["dual_gap"],
-        rtol=1e-10,
-        atol=1e-10,
-    )
-
-    original_success = exact_recovery(
-        original_fit["beta_hat"],
-        data["beta_true"],
-    )
-
-    optimized_success = exact_recovery(
-        optimized_fit["beta_hat"],
-        data["beta_true"],
-    )
-
-    assert original_success == optimized_success
