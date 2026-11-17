@@ -190,25 +190,59 @@ Preserving the assignment of these random streams was essential for ensuring tha
 
 ### 4.2 Solution Implemented
 
-A separate implementation was created in `src/parallel.py` using Python's `concurrent.futures.ProcessPoolExecutor`.
+Scenario-level multiprocessing was implemented in `src/parallel.py`
+using Python's `concurrent.futures.ProcessPoolExecutor`.
 
-Replications were grouped by scenario, and each scenario was assigned a deterministic sequence of child seeds.
+The following simplified excerpts illustrate the execution change.
+Data generation, fitting, and result-recording details are omitted.
 
-The main process prepared the tasks and assigned them to worker processes.
+**Before — sequential scenario execution:**
 
 ```python
-
-with ProcessPoolExecutor(max_workers=max_workers) as executor:
-
-    batches = list(executor.map(run_scenario, tasks))
-
+for _, scenario in scenarios.iterrows():
+    for replication_id in range(reps):
+        # Generate data using this replication's assigned seed.
+        # Fit Lasso and record the recovery outcome.
+        ...
 ```
 
-The use of `executor.map()` preserves the order of returned scenario results.
+The serial implementation completes each scenario before starting
+the next one.
 
-The implementation supports configurable worker counts through the `--workers` command-line argument.
+**After — concurrent scenario execution:**
 
-The original serial implementation was retained to facilitate performance comparisons and correctness validation.
+```python
+with ProcessPoolExecutor(max_workers=max_workers) as executor:
+    batches = list(executor.map(run_scenario, tasks))
+
+rows = [row for batch in batches for row in batch]
+return pd.DataFrame(rows)
+```
+
+The main process prepares one task per scenario. Each task contains
+the scenario parameters and the child seeds assigned to its
+replications. Worker processes execute these tasks concurrently.
+
+Both serial and parallel implementations spawn the same total
+number of child seeds and assign them in the same scenario and
+replication order. This preserves the random-stream assignment
+independently of worker scheduling.
+
+`executor.map()` returns scenario results in input-task order.
+Flattening the returned batches therefore preserves the serial
+output ordering.
+
+The combined implementation also precomputes lambda once per
+scenario. The parallel-only implementation omits lambda
+precomputation while retaining some scenario-level parameter caching.
+
+Worker counts are configurable through the `--workers` command-line
+argument. The updated serial implementation is retained for
+correctness comparisons, and the original Unit 2 implementation is
+preserved at Git tag `unit3-baseline`.
+
+This change distributes the workload across processes without
+reducing the number of generated datasets or Lasso fits.
 
 ### 4.3 Initial Performance Results
 
@@ -275,7 +309,17 @@ The combined four-worker implementation achieved a 2.356x speedup, reducing medi
 
 Algorithmic-only execution was 2.3% slower in observed median wall-clock time. This difference does not establish a systematic slowdown or a meaningful speedup.
 
-The parallel-only four-worker configuration achieved a lower observed median runtime than the corrected combined four-worker configuration (30.50 versus 31.87 seconds). However, the difference is small relative to run-to-run variability and does not establish a reliable additional speedup from lambda precomputation.
+The parallel-only four-worker configuration had a lower observed
+median runtime than the combined four-worker configuration
+(30.50 versus 31.87 seconds). Its three measurements ranged from
+30.20 to 30.73 seconds, whereas the combined measurements ranged
+from 31.86 to 32.21 seconds. Thus, all three parallel-only
+measurements were below all three combined measurements.
+
+However, with only three repetitions and a nonrandomized execution
+order, the experiment does not establish that lambda precomputation
+caused the difference. These results provide no evidence of an
+additional parallel runtime benefit from lambda precomputation.
 
 The final controlled benchmark was executed using the automated
 
@@ -753,7 +797,14 @@ Consequently, the preferred worker count depends on whether the objective is to 
 
 Experiments involving sparse-support matrix multiplication and Fortran-contiguous array storage demonstrated that theoretically attractive or locally faster operations do not necessarily improve the complete simulation.
 
-The final implementation retained only modifications supported by correctness checks and meaningful performance evidence.
+Parallelization was retained for its measured wall-clock benefit.
+Lambda precomputation was retained for reduced redundancy and
+clearer organization, without claiming an end-to-end speedup.
+Both retained changes were checked for correctness.
+
+The sparse-support multiplication and Fortran-layout candidates
+were rejected because the available full-simulation measurements
+did not demonstrate a convincing runtime benefit.
 
 ### 9.6 Overall Conclusion
 
