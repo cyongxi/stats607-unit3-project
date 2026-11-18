@@ -43,6 +43,7 @@ def main():
             convergence_count = 0
             n_iter = np.nan
             dual_gap = np.nan
+            caught = []
 
             try:
                 with warnings.catch_warnings(record=True) as caught:
@@ -64,20 +65,6 @@ def main():
                         sigma=float(scenario["sigma"]),
                     )
 
-                warning_count = len(caught)
-                convergence_count = sum(
-                    issubclass(w.category, ConvergenceWarning)
-                    for w in caught
-                )
-
-                for w in caught:
-                    issues.append({
-                        "scenario_id": scenario["scenario_id"],
-                        "replication": replication,
-                        "type": w.category.__name__,
-                        "message": str(w.message),
-                    })
-
                 n_iter = fitted["n_iter"]
                 dual_gap = fitted["dual_gap"]
 
@@ -88,6 +75,20 @@ def main():
                     "replication": replication,
                     "type": type(exc).__name__,
                     "message": str(exc),
+                })
+
+            warning_count = len(caught)
+            convergence_count = sum(
+                issubclass(w.category, ConvergenceWarning)
+                for w in caught
+            )
+
+            for w in caught:
+                issues.append({
+                    "scenario_id": scenario["scenario_id"],
+                    "replication": replication,
+                    "type": w.category.__name__,
+                    "message": str(w.message),
                 })
 
             records.append({

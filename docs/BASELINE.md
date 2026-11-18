@@ -6,7 +6,9 @@ This document evaluates the computational performance and numerical stability of
 
 The study includes 126 scenarios, with 200 Monte Carlo replications per scenario, for a total of 25,200 Lasso fits.
 
-All baseline measurements were performed before modifying the original simulation implementation.
+The initial baseline measurements were collected before optimizing the simulation. The later controlled benchmark re-executed the original implementation preserved at Git tag `unit3-baseline`.
+
+The commands shown below record historical invocations. To reproduce the original baseline using the current repository, use the separate baseline worktree rather than the updated Unit 3 source tree.
 
 ## 2. Runtime Benchmark
 
@@ -35,6 +37,40 @@ Summary:
 The initial three-run baseline had a median runtime of 73.75 seconds and was used for exploratory optimization comparisons. The later controlled benchmark used a separately measured original serial baseline median of 75.07 seconds. Final speedups reported in the project are calculated using the controlled baseline.
 
 These measurements cover the simulation stage (`make simulate`), not the analysis and figure-generation stages. The earlier Unit 2 record reported approximately 74.90 seconds for `make all` in its original environment; that historical measurement is reported separately because the execution scope and environment differ.
+
+### Reproducing the Original Baseline Now
+
+First prepare the `unit3-baseline` worktree as described in the README.
+Then run the following commands from the main project directory:
+
+```bash
+PROJECT_ROOT="$(pwd)"
+PROJECT_PYTHON="$PROJECT_ROOT/.venv/bin/python"
+
+mkdir -p "$PROJECT_ROOT/results/profiling"
+
+(
+    cd "$PROJECT_ROOT/../stats607-unit3-baseline" || exit 1
+
+    export OPENBLAS_NUM_THREADS=1
+    export OMP_NUM_THREADS=1
+    export MKL_NUM_THREADS=1
+
+    /usr/bin/time -p "$PROJECT_PYTHON" -m src.simulation
+
+    "$PROJECT_PYTHON" -m cProfile \
+        -o "$PROJECT_ROOT/results/profiling/baseline_full.prof" \
+        -m src.simulation
+)
+```
+
+If using `.venv-1`, set
+`PROJECT_PYTHON="$PROJECT_ROOT/.venv-1/bin/python"` instead.
+
+These commands execute the original source directly, so an existing
+simulation output does not cause Make to skip the timing run.
+New timings depend on the execution environment and do not replace
+the historical measurements reported below.
 
 ## 3. Runtime Profiling
 
