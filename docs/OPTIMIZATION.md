@@ -316,9 +316,7 @@ median runtime than the combined four-worker configuration
 from 31.86 to 32.21 seconds. Thus, all three parallel-only
 measurements were below all three combined measurements.
 
-However, with only three repetitions and a nonrandomized execution
-order, the experiment does not establish that lambda precomputation
-caused the difference. These results provide no evidence of an
+However, with only three repetitions per configuration and a rotating but nonrandomized execution order, the experiment does not establish that lambda precomputation caused the difference.These results provide no evidence of an
 additional parallel runtime benefit from lambda precomputation.
 
 The final controlled benchmark was executed using the automated
@@ -771,7 +769,7 @@ The controlled serial benchmark did not demonstrate a meaningful end-to-end spee
 
 - Algorithmic-only median: 76.83 seconds.
 
-The observed difference was too small to establish a meaningful improvement.
+The algorithmic-only configuration had a higher observed median runtime. With only three repetitions per configuration, these measurements provide no evidence of an end-to-end speedup and do not establish a systematic slowdown.
 
 This result illustrates Amdahl's Law: optimizing a small fraction of total execution time has limited impact on overall performance.
 
